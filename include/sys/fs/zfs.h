@@ -595,6 +595,9 @@ typedef struct zpool_rewind_policy {
 /* vdev enclosure sysfs path */
 #define	ZPOOL_CONFIG_VDEV_ENC_SYSFS_PATH	"vdev_enc_sysfs_path"
 
+/* Kind (ssd, hdd, mix, file) (part of vdev_stat_ex_t) */
+#define	ZPOOL_CONFIG_VDEV_KIND		"kind"
+
 #define	ZPOOL_CONFIG_WHOLE_DISK		"whole_disk"
 #define	ZPOOL_CONFIG_ERRCOUNT		"error_count"
 #define	ZPOOL_CONFIG_NOT_PRESENT	"not_present"
@@ -729,6 +732,14 @@ typedef enum vdev_aux {
 	VDEV_AUX_EXTERNAL,	/* external diagnosis			*/
 	VDEV_AUX_SPLIT_POOL	/* vdev was split off into another pool	*/
 } vdev_aux_t;
+
+typedef enum vdev_kind_info {
+	VDEV_KIND_UNKNOWN = 0,	/* not set yet			*/
+	VDEV_KIND_SSD,		/* device is solid state	*/
+	VDEV_KIND_MIXED,	/* device has both kinds	*/
+	VDEV_KIND_FILE,		/* device is file backed	*/
+	VDEV_KIND_HDD		/* device is not solid state	*/
+} vdev_kind_info_t;
 
 /*
  * pool state.  The following states are written to disk as part of the normal
@@ -887,6 +898,8 @@ typedef struct vdev_stat_ex {
 	uint64_t vsx_agg_histo[ZIO_PRIORITY_NUM_QUEUEABLE]
 	    [VDEV_RQ_HISTO_BUCKETS];
 
+	/* Kind of vdev (ssd/file/hdd/mixed).  Exported as one value. */
+	uint64_t vsx_kind;
 } vdev_stat_ex_t;
 
 /*
