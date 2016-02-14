@@ -723,6 +723,12 @@ typedef enum vdev_aux {
 	VDEV_AUX_SPLIT_POOL	/* vdev was split off into another pool	*/
 } vdev_aux_t;
 
+typedef enum vdev_nonrotational_info {
+	VDEV_NONROTATIONAL_YES,		/* device is solid state	*/
+	VDEV_NONROTATIONAL_MIXED,	/* device has both kinds	*/
+	VDEV_NONROTATIONAL_NO		/* device is not solid state	*/
+} vdev_nonrotational_info_t;
+
 /*
  * pool state.  The following states are written to disk as part of the normal
  * SPA lifecycle: ACTIVE, EXPORTED, DESTROYED, SPARE, L2CACHE.  The remaining
@@ -812,6 +818,7 @@ typedef struct vdev_stat {
 	hrtime_t	vs_timestamp;		/* time since vdev load	*/
 	uint64_t	vs_state;		/* vdev state		*/
 	uint64_t	vs_aux;			/* see vdev_aux_t	*/
+	uint64_t	vs_nonrotational;	/* nonrotational	*/
 	uint64_t	vs_alloc;		/* space allocated	*/
 	uint64_t	vs_space;		/* total capacity	*/
 	uint64_t	vs_dspace;		/* deflated capacity	*/
