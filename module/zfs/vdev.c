@@ -2897,6 +2897,16 @@ vdev_get_stats_ex(vdev_t *vd, vdev_stat_t *vs, vdev_stat_ex_t *vsx)
 		    !vd->vdev_ishole) {
 			vs->vs_fragmentation = vd->vdev_mg->mg_fragmentation;
 		}
+		/*
+		 * This is static information, so could be set in vd->vdev_stat
+		 * elsewhere...?
+		 */
+		if (vd->vdev_nonrot)
+			vs->vs_nonrotational = VDEV_NONROTATIONAL_YES;
+		else if (vd->vdev_nonrot_mix)
+			vs->vs_nonrotational = VDEV_NONROTATIONAL_MIXED;
+		else
+			vs->vs_nonrotational = VDEV_NONROTATIONAL_NO;
 	}
 
 	ASSERT(spa_config_held(vd->vdev_spa, SCL_ALL, RW_READER) != 0);
