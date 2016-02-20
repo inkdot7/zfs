@@ -111,6 +111,12 @@ int zfs_mg_noalloc_threshold = 0;
 int zfs_mg_fragmentation_threshold = 85;
 
 /*
+ * Allocate from faster vdev in pool if below threshold, allocate
+ * from slower vdev in pool if above threshold.
+ */
+int zfs_metaslab_mixed_slowsize_threshold = 0;
+
+/*
  * Allow metaslabs to keep their active state as long as their fragmentation
  * percentage is less than or equal to zfs_metaslab_fragmentation_threshold. An
  * active metaslab that exceeds this threshold will no longer keep its active
@@ -200,6 +206,7 @@ metaslab_class_create(spa_t *spa, metaslab_ops_t *ops)
 	for (i = 0; i < METASLAB_CLASS_ROTORS; i++)
 		mc->mc_rotorv[i] = NULL;
 	mc->mc_ops = ops;
+	mc->mc_max_nrot = -1;
 
 	return (mc);
 }
@@ -535,6 +542,9 @@ metaslab_group_activate(metaslab_group_t *mg)
 
 	mg->mg_nrot = 0; /* TODO: when vector, decide which rotor to place in */
 
+	if (!mg->mg_vd->vdev_nonrot)
+		mg->mg_nrot = 1;
+
 	mg->mg_aliquot = metaslab_aliquot * MAX(1, mg->mg_vd->vdev_children);
 	metaslab_group_alloc_update(mg);
 
@@ -549,6 +559,9 @@ metaslab_group_activate(metaslab_group_t *mg)
 		mgnext->mg_prev = mg;
 	}
 	mc->mc_rotorv[mg->mg_nrot] = mg;
+
+	if (mg->mg_nrot > mc->mc_max_nrot)
+		mc->mc_max_nrot = mg->mg_nrot;
 }
 
 void
@@ -580,6 +593,10 @@ metaslab_group_passivate(metaslab_group_t *mg)
 
 	if (mg == mgnext) {
 		mc->mc_rotorv[mg->mg_nrot] = NULL;
+		mc->mc_max_nrot = -1;
+		for (i = 0; i < METASLAB_CLASS_ROTORS; i++)
+			if (mc->mc_rotorv[i] != NULL)
+				mc->mc_max_nrot = i;
 	} else {
 		mc->mc_rotorv[mg->mg_nrot] = mgnext;
 		mgprev->mg_next = mgnext;
@@ -2224,6 +2241,19 @@ metaslab_alloc_dva(spa_t *spa, metaslab_class_t *mc, uint64_t psize,
 	 */
 	nrot = 0;
 
+	if (zfs_metaslab_mixed_slowsize_threshold) {
+		if (psize >= zfs_metaslab_mixed_slowsize_threshold) {
+			nrot = 1;
+
+			if (nrot > mc->mc_max_nrot)
+				nrot = mc->mc_max_nrot;
+		}
+	}
+
+	for (; nrot < METASLAB_CLASS_ROTORS; nrot++)
+		if (mc->mc_rotorv[nrot])
+			break;
+
 	/*
 	 * Start at the rotor and loop through all mgs until we find something.
 	 * Note that there's no locking on mc_rotor or mc_aliquot because
@@ -2283,12 +2313,21 @@ metaslab_alloc_dva(spa_t *spa, metaslab_class_t *mc, uint64_t psize,
 		mg = mc->mc_rotorv[nrot];
 	}
 
+	ASSERT(mg != NULL);
 	/*
 	 * If the hint put us into the wrong metaslab class, or into a
 	 * metaslab group that has been passivated, just follow the rotor.
+	 * Also if we got a better rotor than chosen.
 	 */
-	if (mg->mg_class != mc || mg->mg_activation_count <= 0)
-		mg = mc->mc_rotorv[nrot];
+	if (mg->mg_class != mc || mg->mg_activation_count <= 0 ||
+	    mg->mg_nrot < nrot) {
+		for (i = nrot; i < METASLAB_CLASS_ROTORS; i++) {
+			if (mc->mc_rotorv[i] != NULL) {
+				mg = mc->mc_rotorv[i];
+				break;
+			}
+		}
+	}
 
 top1:
 	rotor = mg;
@@ -2744,6 +2783,7 @@ module_param(metaslab_debug_unload, int, 0644);
 module_param(metaslab_preload_enabled, int, 0644);
 module_param(zfs_mg_noalloc_threshold, int, 0644);
 module_param(zfs_mg_fragmentation_threshold, int, 0644);
+module_param(zfs_metaslab_mixed_slowsize_threshold, int, 0644);
 module_param(zfs_metaslab_fragmentation_threshold, int, 0644);
 module_param(metaslab_fragmentation_factor_enabled, int, 0644);
 module_param(metaslab_lba_weighting_enabled, int, 0644);
@@ -2762,6 +2802,8 @@ MODULE_PARM_DESC(zfs_mg_noalloc_threshold,
 	"percentage of free space for metaslab group to allow allocation");
 MODULE_PARM_DESC(zfs_mg_fragmentation_threshold,
 	"fragmentation for metaslab group to allow allocation");
+MODULE_PARM_DESC(zfs_metaslab_mixed_slowsize_threshold,
+	"size threshold to choose slower (rotating) storage in mixed pool");
 
 MODULE_PARM_DESC(zfs_metaslab_fragmentation_threshold,
 	"fragmentation for metaslab to allow allocation");

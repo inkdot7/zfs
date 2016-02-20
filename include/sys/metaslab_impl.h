@@ -67,13 +67,14 @@ extern "C" {
  * big and less expensive.  Depending on the size of an allocation,
  * a vdev will be chosen.
  */
-#define	METASLAB_CLASS_ROTORS	1
+#define	METASLAB_CLASS_ROTORS	2
 
 struct metaslab_class {
 	spa_t			*mc_spa;
 	metaslab_group_t	*mc_rotorv[METASLAB_CLASS_ROTORS];
 	metaslab_ops_t		*mc_ops;
 	uint64_t		mc_aliquotv[METASLAB_CLASS_ROTORS];
+	int			mc_max_nrot;    /* highest rotor with member */
 	uint64_t		mc_alloc_groups; /* # of allocatable groups */
 	uint64_t		mc_alloc;	/* total allocated space */
 	uint64_t		mc_deferred;	/* total deferred frees */
