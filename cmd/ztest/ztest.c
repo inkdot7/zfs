@@ -2784,7 +2784,8 @@ ztest_vdev_add_remove(ztest_ds_t *zd, uint64_t id)
 		/*
 		 * Grab the guid from the head of the log class rotor.
 		 */
-		guid = spa_log_class(spa)->mc_rotor->mg_vd->vdev_guid;
+		/* TODO: rotor no [0] ??  Not necessarily. */
+		guid = spa_log_class(spa)->mc_rotorv[0]->mg_vd->vdev_guid;
 
 		spa_config_exit(spa, SCL_VDEV, FTAG);
 
