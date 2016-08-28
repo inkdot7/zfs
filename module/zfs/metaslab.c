@@ -494,7 +494,11 @@ metaslab_group_create(metaslab_class_t *mc, vdev_t *vd)
 	mg->mg_vd = vd;
 	mg->mg_class = mc;
 	mg->mg_activation_count = 0;
-	mg->mg_nrot = -1;
+
+	/* Decide which rotor of vector to place in. */
+	mg->mg_nrot = 0;
+	if (!mg->mg_vd->vdev_nonrot)
+		mg->mg_nrot = 1;
 
 	mg->mg_taskq = taskq_create("metaslab_group_taskq", metaslab_load_pct,
 	    maxclsyspri, 10, INT_MAX, TASKQ_THREADS_CPU_PCT | TASKQ_DYNAMIC);
@@ -507,7 +511,6 @@ metaslab_group_destroy(metaslab_group_t *mg)
 {
 	ASSERT(mg->mg_prev == NULL);
 	ASSERT(mg->mg_next == NULL);
-	ASSERT(mg->mg_nrot == -1);
 	/*
 	 * We may have gone below zero with the activation count
 	 * either because we never activated in the first place or
@@ -534,16 +537,10 @@ metaslab_group_activate(metaslab_group_t *mg)
 		ASSERT(mc->mc_rotorv[i] != mg);
 	ASSERT(mg->mg_prev == NULL);
 	ASSERT(mg->mg_next == NULL);
-	ASSERT(mg->mg_nrot == -1);
 	ASSERT(mg->mg_activation_count <= 0);
 
 	if (++mg->mg_activation_count <= 0)
 		return;
-
-	mg->mg_nrot = 0; /* TODO: when vector, decide which rotor to place in */
-
-	if (!mg->mg_vd->vdev_nonrot)
-		mg->mg_nrot = 1;
 
 	mg->mg_aliquot = metaslab_aliquot * MAX(1, mg->mg_vd->vdev_children);
 	metaslab_group_alloc_update(mg);
@@ -578,7 +575,6 @@ metaslab_group_passivate(metaslab_group_t *mg)
 			ASSERT(mc->mc_rotorv[i] != mg);
 		ASSERT(mg->mg_prev == NULL);
 		ASSERT(mg->mg_next == NULL);
-		ASSERT(mg->mg_nrot == -1);
 		ASSERT(mg->mg_activation_count < 0);
 		return;
 	}
@@ -588,8 +584,6 @@ metaslab_group_passivate(metaslab_group_t *mg)
 
 	mgprev = mg->mg_prev;
 	mgnext = mg->mg_next;
-
-	ASSERT(mg->mg_nrot != -1);
 
 	if (mg == mgnext) {
 		mc->mc_rotorv[mg->mg_nrot] = NULL;
@@ -605,7 +599,6 @@ metaslab_group_passivate(metaslab_group_t *mg)
 
 	mg->mg_prev = NULL;
 	mg->mg_next = NULL;
-	mg->mg_nrot = -1;
 }
 
 uint64_t
