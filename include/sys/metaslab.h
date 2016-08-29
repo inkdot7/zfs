@@ -77,7 +77,7 @@ void metaslab_class_histogram_verify(metaslab_class_t *);
 uint64_t metaslab_class_fragmentation(metaslab_class_t *);
 uint64_t metaslab_class_expandable_space(metaslab_class_t *);
 
-void metaslab_class_space_update(metaslab_class_t *, int64_t, int64_t,
+void metaslab_class_space_update(metaslab_class_t *, int, int64_t, int64_t,
     int64_t, int64_t);
 uint64_t metaslab_class_get_alloc(metaslab_class_t *);
 uint64_t metaslab_class_get_space(metaslab_class_t *);
