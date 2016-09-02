@@ -2330,7 +2330,7 @@ metaslab_alloc_dva(spa_t *spa, metaslab_class_t *mc, uint64_t psize,
 	uint64_t asize;
 	uint64_t distance;
 	int nrot;
-	int i;
+	int i, j;
 
 	ASSERT(!DVA_IS_VALID(&dva[d]));
 
@@ -2426,11 +2426,16 @@ metaslab_alloc_dva(spa_t *spa, metaslab_class_t *mc, uint64_t psize,
 	if (mg->mg_class != mc || mg->mg_activation_count <= 0 ||
 	    mg->mg_nrot < nrot) {
 		for (i = nrot; i < METASLAB_CLASS_ROTORS; i++) {
-			if (mc->mc_rotorv[i] != NULL) {
-				mg = mc->mc_rotorv[i];
+			/* Better than failing we try the better options. */
+			j = (i + nrot) % METASLAB_CLASS_ROTORS;
+			if (mc->mc_rotorv[j] != NULL) {
+				mg = mc->mc_rotorv[j];
 				break;
 			}
 		}
+		ASSERT(mg->mg_class == mc);
+		ASSERT(mg->mg_activation_count > 0);
+		/* VERIFY3U(mg->mg_nrot, >=, nrot); */
 	}
 
 top1:
@@ -2586,9 +2591,12 @@ next:
 	 * (Not earlier ones, to not waste expensive space for the
 	 * future for data that is not worth it.)
 	 */
-	for (i = mg->mg_nrot+1; i < METASLAB_CLASS_ROTORS; i++) {
-		if (mc->mc_rotorv[i] != NULL) {
-			mg = mc->mc_rotorv[i];
+	for (i = (mg->mg_nrot - nrot + METASLAB_CLASS_ROTORS + 1) %
+	    METASLAB_CLASS_ROTORS; i && i < METASLAB_CLASS_ROTORS; i++) {
+		/* Better than failing we try the better options. */
+		j = (i + nrot) % METASLAB_CLASS_ROTORS;
+		if (mc->mc_rotorv[j] != NULL) {
+			mg = mc->mc_rotorv[j];
 			goto top1;
 		}
 	}
