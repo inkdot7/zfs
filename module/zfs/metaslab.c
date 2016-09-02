@@ -601,10 +601,12 @@ metaslab_group_destroy(metaslab_group_t *mg)
 }
 
 void
+metaslab_group_rotor_insert(metaslab_group_t *mg);
+
+void
 metaslab_group_activate(metaslab_group_t *mg)
 {
 	metaslab_class_t *mc = mg->mg_class;
-	metaslab_group_t *mgprev, *mgnext;
 	int i;
 
 	ASSERT(spa_config_held(mc->mc_spa, SCL_ALLOC, RW_WRITER));
@@ -620,6 +622,15 @@ metaslab_group_activate(metaslab_group_t *mg)
 
 	mg->mg_aliquot = metaslab_aliquot * MAX(1, mg->mg_vd->vdev_children);
 	metaslab_group_alloc_update(mg);
+
+	metaslab_group_rotor_insert(mg);
+}
+
+void
+metaslab_group_rotor_insert(metaslab_group_t *mg)
+{
+	metaslab_class_t *mc = mg->mg_class;
+	metaslab_group_t *mgprev, *mgnext;
 
 	if ((mgprev = mc->mc_rotorv[mg->mg_nrot]) == NULL) {
 		mg->mg_prev = mg;
@@ -638,10 +649,12 @@ metaslab_group_activate(metaslab_group_t *mg)
 }
 
 void
+metaslab_group_rotor_remove(metaslab_group_t *mg);
+
+void
 metaslab_group_passivate(metaslab_group_t *mg)
 {
 	metaslab_class_t *mc = mg->mg_class;
-	metaslab_group_t *mgprev, *mgnext;
 	int i;
 
 	ASSERT(spa_config_held(mc->mc_spa, SCL_ALLOC, RW_WRITER));
@@ -657,6 +670,16 @@ metaslab_group_passivate(metaslab_group_t *mg)
 
 	taskq_wait_outstanding(mg->mg_taskq, 0);
 	metaslab_group_alloc_update(mg);
+
+	metaslab_group_rotor_remove(mg);
+}
+
+void
+metaslab_group_rotor_remove(metaslab_group_t *mg)
+{
+	metaslab_class_t *mc = mg->mg_class;
+	metaslab_group_t *mgprev, *mgnext;
+	int i;
 
 	mgprev = mg->mg_prev;
 	mgnext = mg->mg_next;
@@ -2076,10 +2099,14 @@ metaslab_sync_done(metaslab_t *msp, uint64_t txg)
 			    &msp->ms_lock);
 		}
 
+		if (mg->mg_activation_count > 0)
+			metaslab_group_rotor_remove(mg);
 		/* Decide which rotor of vector to place in. */
 		mg->mg_nrot = 0;
 		if (!mg->mg_vd->vdev_nonrot)
 			mg->mg_nrot = 1;
+		if (mg->mg_activation_count > 0)
+			metaslab_group_rotor_insert(mg);
 
 		vdev_space_update(vd, mg->mg_nrot, 0, 0, msp->ms_size);
 	}
