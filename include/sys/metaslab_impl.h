@@ -67,7 +67,7 @@ extern "C" {
  * big and less expensive.  Depending on the size of an allocation,
  * a vdev will be chosen.
  */
-#define	METASLAB_CLASS_ROTORS	2
+#define	METASLAB_CLASS_ROTORS	5
 
 struct metaslab_class {
 	spa_t			*mc_spa;

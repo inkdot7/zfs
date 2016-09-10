@@ -112,12 +112,6 @@ int zfs_mg_noalloc_threshold = 0;
 int zfs_mg_fragmentation_threshold = 85;
 
 /*
- * Allocate from faster vdev in pool if below threshold, allocate
- * from slower vdev in pool if above threshold.
- */
-int zfs_metaslab_mixed_slowsize_threshold = 0;
-
-/*
  * Allow metaslabs to keep their active state as long as their fragmentation
  * percentage is less than or equal to zfs_metaslab_fragmentation_threshold. An
  * active metaslab that exceeds this threshold will no longer keep its active
@@ -561,6 +555,22 @@ metaslab_group_alloc_update(metaslab_group_t *mg)
 }
 
 /*
+ * Five categories, from faster to slower:
+ *
+ * 0: nonrot (SSD)      disk or mirror
+ * 1: nonrot (SSD)      raidz
+ * 2: mixed nonrot+rot  anything (raidz makes little sense)
+ * 3: rot (HDD)         disk or mirror
+ * 4: rot (HDD)         raidz
+ */
+
+#define	METASLAB_ROTOR_VDEV_TYPE_SSD		0x01
+#define	METASLAB_ROTOR_VDEV_TYPE_SSD_RAIDZ	0x02
+#define	METASLAB_ROTOR_VDEV_TYPE_MIXED		0x04
+#define	METASLAB_ROTOR_VDEV_TYPE_HDD		0x08
+#define	METASLAB_ROTOR_VDEV_TYPE_HDD_RAIDZ	0x10
+
+/*
  * Please do not judge the rotor vector approach based on the ugliness
  * of this parsing routine.  :-)
  */
@@ -646,15 +656,20 @@ metaslab_parse_rotor_config(metaslab_class_t *mc, char *rotorvector)
 			len = comma-rotorvector;
 
 			if (strncmp(rotorvector, "ssd", len) == 0)
-				mc->mc_rotvec_categories[nrot] |= 0x01;
+				mc->mc_rotvec_categories[nrot] |=
+				    METASLAB_ROTOR_VDEV_TYPE_SSD;
 			else if (strncmp(rotorvector, "ssd-raidz", len) == 0)
-				mc->mc_rotvec_categories[nrot] |= 0x02;
+				mc->mc_rotvec_categories[nrot] |=
+				    METASLAB_ROTOR_VDEV_TYPE_SSD_RAIDZ;
 			else if (strncmp(rotorvector, "mixed", len) == 0)
-				mc->mc_rotvec_categories[nrot] |= 0x04;
+				mc->mc_rotvec_categories[nrot] |=
+				    METASLAB_ROTOR_VDEV_TYPE_MIXED;
 			else if (strncmp(rotorvector, "hdd", len) == 0)
-				mc->mc_rotvec_categories[nrot] |= 0x08;
+				mc->mc_rotvec_categories[nrot] |=
+				    METASLAB_ROTOR_VDEV_TYPE_HDD;
 			else if (strncmp(rotorvector, "hdd-raidz", len) == 0)
-				mc->mc_rotvec_categories[nrot] |= 0x10;
+				mc->mc_rotvec_categories[nrot] |=
+				    METASLAB_ROTOR_VDEV_TYPE_HDD_RAIDZ;
 			else {
 				/* It must be a vdev guid. */
 				uint64_t guid;
@@ -733,25 +748,43 @@ metaslab_parse_rotor_config(metaslab_class_t *mc, char *rotorvector)
 }
 
 int
-metaslab_vdev_rotor_category(vdev_t *vd)
+metaslab_vdev_rotor_category(metaslab_class_t *mc, vdev_t *vd)
 {
-	/*
-	 * Five categories, from faster to slower:
-	 *
-	 * 0: nonrot (SSD)      disk or mirror
-	 * 1: nonrot (SSD)      raidz
-	 * 2: mixed nonrot+rot  anything (raidz makes little sense)
-	 * 3: rot (HDD)         disk or mirror
-	 * 4: rot (HDD)         raidz
-	 */
+	int i, j;
+	int type;
+
+	/* First match on the vdev guid assignments. */
+	for (i = 0; i < METASLAB_CLASS_ROTORS; i++)
+		for (j = 0; j < 5 && mc->mc_rotvec_vdev_guids[i][j]; j++)
+			if (mc->mc_rotvec_vdev_guids[i][j] == vd->vdev_guid)
+				return (i);
+
+	/* Match on the kind of vdev. */
+
+	/* Figure out what kind we are. */
 
 	if (vd->vdev_nonrot) {
-		return ((vd->vdev_ops != &vdev_raidz_ops) ? 0 : 1);
+		type = ((vd->vdev_ops != &vdev_raidz_ops) ?
+		    METASLAB_ROTOR_VDEV_TYPE_SSD :
+		    METASLAB_ROTOR_VDEV_TYPE_SSD_RAIDZ);
 	} else if (vd->vdev_nonrot_mix) {
-		return (2);
+		type = METASLAB_ROTOR_VDEV_TYPE_MIXED;
 	} else {
-		return ((vd->vdev_ops != &vdev_raidz_ops) ? 3 : 4);
+		type = ((vd->vdev_ops != &vdev_raidz_ops) ?
+		    METASLAB_ROTOR_VDEV_TYPE_HDD :
+		    METASLAB_ROTOR_VDEV_TYPE_HDD_RAIDZ);
 	}
+
+	for (i = 0; i < METASLAB_CLASS_ROTORS; i++)
+		if (mc->mc_rotvec_categories[i] & type)
+			return (i);
+
+	/* Assign to last category, i.e. with a (dummy) zero limit. */
+	for (i = 0; i < METASLAB_CLASS_ROTORS; i++)
+		if (mc->mc_rotvec_threshold[i] == 0)
+			return (i);
+
+	return (METASLAB_CLASS_ROTORS-1);
 }
 
 metaslab_group_t *
@@ -768,9 +801,7 @@ metaslab_group_create(metaslab_class_t *mc, vdev_t *vd)
 	mg->mg_activation_count = 0;
 
 	/* Decide which rotor of vector to place in. */
-	mg->mg_nrot = 0;
-	if (!mg->mg_vd->vdev_nonrot)
-		mg->mg_nrot = 1;
+	mg->mg_nrot = metaslab_vdev_rotor_category(mc, mg->mg_vd);
 
 	mg->mg_taskq = taskq_create("metaslab_group_taskq", metaslab_load_pct,
 	    maxclsyspri, 10, INT_MAX, TASKQ_THREADS_CPU_PCT | TASKQ_DYNAMIC);
@@ -2297,10 +2328,9 @@ metaslab_sync_done(metaslab_t *msp, uint64_t txg)
 
 		if (mg->mg_activation_count > 0)
 			metaslab_group_rotor_remove(mg);
-		/* Decide which rotor of vector to place in. */
-		mg->mg_nrot = 0;
-		if (!mg->mg_vd->vdev_nonrot)
-			mg->mg_nrot = 1;
+		/* Re-decide which rotor of vector to place in. */
+		mg->mg_nrot =
+		    metaslab_vdev_rotor_category(mg->mg_class, mg->mg_vd);
 		if (mg->mg_activation_count > 0)
 			metaslab_group_rotor_insert(mg);
 
@@ -2541,13 +2571,10 @@ metaslab_alloc_dva(spa_t *spa, metaslab_class_t *mc, uint64_t psize,
 	 */
 	nrot = 0;
 
-	if (zfs_metaslab_mixed_slowsize_threshold) {
-		if (psize >= zfs_metaslab_mixed_slowsize_threshold) {
-			nrot = 1;
-
-			if (nrot > mc->mc_max_nrot)
-				nrot = mc->mc_max_nrot;
-		}
+	while (nrot < mc->mc_max_nrot) {
+		if (psize < mc->mc_rotvec_threshold[nrot])
+			break; /* Size below threshold, accept. */
+		nrot++;
 	}
 
 	for (; nrot < METASLAB_CLASS_ROTORS; nrot++)
@@ -3092,7 +3119,6 @@ module_param(metaslab_debug_unload, int, 0644);
 module_param(metaslab_preload_enabled, int, 0644);
 module_param(zfs_mg_noalloc_threshold, int, 0644);
 module_param(zfs_mg_fragmentation_threshold, int, 0644);
-module_param(zfs_metaslab_mixed_slowsize_threshold, int, 0644);
 module_param(zfs_metaslab_fragmentation_threshold, int, 0644);
 module_param(metaslab_fragmentation_factor_enabled, int, 0644);
 module_param(metaslab_lba_weighting_enabled, int, 0644);
@@ -3111,8 +3137,6 @@ MODULE_PARM_DESC(zfs_mg_noalloc_threshold,
 	"percentage of free space for metaslab group to allow allocation");
 MODULE_PARM_DESC(zfs_mg_fragmentation_threshold,
 	"fragmentation for metaslab group to allow allocation");
-MODULE_PARM_DESC(zfs_metaslab_mixed_slowsize_threshold,
-	"size threshold to choose slower (rotating) storage in mixed pool");
 
 MODULE_PARM_DESC(zfs_metaslab_fragmentation_threshold,
 	"fragmentation for metaslab to allow allocation");
