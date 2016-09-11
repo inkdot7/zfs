@@ -70,7 +70,7 @@ void metaslab_check_free(spa_t *, const blkptr_t *);
 void metaslab_fastwrite_mark(spa_t *, const blkptr_t *);
 void metaslab_fastwrite_unmark(spa_t *, const blkptr_t *);
 
-metaslab_class_t *metaslab_class_create(spa_t *, metaslab_ops_t *);
+metaslab_class_t *metaslab_class_create(spa_t *, metaslab_ops_t *, char *);
 void metaslab_class_destroy(metaslab_class_t *);
 int metaslab_class_validate(metaslab_class_t *);
 void metaslab_class_histogram_verify(metaslab_class_t *);

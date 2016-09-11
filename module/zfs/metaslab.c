@@ -196,10 +196,12 @@ static uint64_t metaslab_fragmentation(metaslab_t *);
  * ==========================================================================
  */
 metaslab_class_t *
-metaslab_class_create(spa_t *spa, metaslab_ops_t *ops)
+metaslab_class_create(spa_t *spa, metaslab_ops_t *ops, char *rvconfig)
 {
 	metaslab_class_t *mc;
 	int i;
+
+	(void) rvconfig;
 
 	mc = kmem_zalloc(sizeof (metaslab_class_t), KM_SLEEP);
 
