@@ -201,8 +201,6 @@ metaslab_class_create(spa_t *spa, metaslab_ops_t *ops, char *rvconfig)
 	metaslab_class_t *mc;
 	int i;
 
-	(void) rvconfig;
-
 	mc = kmem_zalloc(sizeof (metaslab_class_t), KM_SLEEP);
 
 	mc->mc_spa = spa;
@@ -210,6 +208,8 @@ metaslab_class_create(spa_t *spa, metaslab_ops_t *ops, char *rvconfig)
 		mc->mc_rotorv[i] = NULL;
 	mc->mc_ops = ops;
 	mc->mc_max_nrot = -1;
+
+	metaslab_parse_rotor_config(mc, rvconfig);
 
 	return (mc);
 }
@@ -558,6 +558,200 @@ metaslab_group_alloc_update(metaslab_group_t *mg)
 		mc->mc_alloc_groups++;
 
 	mutex_exit(&mg->mg_lock);
+}
+
+/*
+ * Please do not judge the rotor vector approach based on the ugliness
+ * of this parsing routine.  :-)
+ */
+void
+metaslab_parse_rotor_config(metaslab_class_t *mc, char *rotorvector)
+{
+	int nrot = 0;
+	char *endconfig;
+
+	if (rotorvector == NULL)
+		return;
+
+	/*
+	 * Remove prefix used while the COMMENT pool property is abused.
+	 * Using a short prefix due to the 32 character limit of the
+	 * COMMENT property.
+	 */
+	if (strncmp(rotorvector, "RV:", 3) != 0)
+		return;
+	rotorvector += 3;
+
+	/*
+	 * The list consist of colon-separated categories.
+	 * Each catagory is a comma-separated list of vdev guids or
+	 * types (ssd,ssd-raidz,mixed,hdd,hdd-raidz), followed
+	 * by <= and the allocation threshold for the category.
+	 * ('<=' since users likely want to specify that rather than '<')
+	 * The threshold for the last rotor is not to be given, as we
+	 * always allocate somewhere.
+	 */
+
+	/* Clear the configuration. */
+	memset(mc->mc_rotvec_threshold, 0, sizeof (mc->mc_rotvec_threshold));
+	memset(mc->mc_rotvec_vdev_guids, 0, sizeof (mc->mc_rotvec_vdev_guids));
+	memset(mc->mc_rotvec_categories, 0, sizeof (mc->mc_rotvec_categories));
+
+	/*
+	 * The returns when encountering a malformed configuration are
+	 * ok in the sense that we just do not fill the fields any
+	 * further.
+	 */
+
+	/*
+	 * It would probably be better to have separate properties
+	 * for each vector category and each vector threshold.
+	 * Much less parsing logics.
+	 */
+
+	endconfig = rotorvector + strlen(rotorvector);
+
+	while (rotorvector < endconfig) {
+		char *nextrotor;
+		char *colon, *lessthan;
+		char *endtypes;
+		int nguids = 0;
+
+		nextrotor = endconfig;
+		colon = strchr(rotorvector, ':');
+		if (colon == NULL)
+			colon = endconfig;
+		else
+			nextrotor = colon+1;
+		lessthan = strstr(rotorvector, "<=");
+		if ((lessthan == NULL && colon != endconfig) ||
+		    lessthan > colon)
+			return; /* malformed, missing '<=' in this item */
+		if (lessthan != NULL && colon == endconfig)
+			return; /* malformed, '<=' for last item */
+
+		endtypes = (lessthan) ? lessthan : colon;
+
+		while (rotorvector < endtypes) {
+			char *comma, *nexttype;
+			size_t len;
+
+			nexttype = endtypes;
+			comma = strchr(rotorvector, ',');
+			if (comma == NULL || comma > endtypes)
+				comma = endtypes;
+			else
+				nexttype = comma+1;
+
+			len = comma-rotorvector;
+
+			if (strncmp(rotorvector, "ssd", len) == 0)
+				mc->mc_rotvec_categories[nrot] |= 0x01;
+			else if (strncmp(rotorvector, "ssd-raidz", len) == 0)
+				mc->mc_rotvec_categories[nrot] |= 0x02;
+			else if (strncmp(rotorvector, "mixed", len) == 0)
+				mc->mc_rotvec_categories[nrot] |= 0x04;
+			else if (strncmp(rotorvector, "hdd", len) == 0)
+				mc->mc_rotvec_categories[nrot] |= 0x08;
+			else if (strncmp(rotorvector, "hdd-raidz", len) == 0)
+				mc->mc_rotvec_categories[nrot] |= 0x10;
+			else {
+				/* It must be a vdev guid. */
+				uint64_t guid;
+#ifdef _KERNEL
+				char tmpstr[64];
+				size_t len = comma-rotorvector;
+				strncpy(tmpstr, rotorvector, len);
+				tmpstr[len] = 0;
+#endif
+#ifdef _KERNEL
+				if (kstrtoull(tmpstr, 0, &guid) != 0)
+					return; /* malformed configuration */
+#else
+				char *endptr;
+				guid = strtoull(rotorvector, &endptr, 0);
+				if (endptr != comma)
+					return; /* malformed configuration */
+#endif
+				if (nguids >= 5)
+					return; /* too many guids... */
+				mc->mc_rotvec_vdev_guids[nrot][nguids] = guid;
+				nguids++;
+			}
+			rotorvector = nexttype;
+		}
+
+		if (lessthan) {
+			uint64_t threshold;
+#ifdef _KERNEL
+			char tmpstr[64];
+			size_t len = colon-(lessthan+2);
+			strncpy(tmpstr, lessthan+2, len);
+			tmpstr[len] = 0;
+#endif
+#ifdef _KERNEL
+			if (kstrtoull(tmpstr, 0, &threshold) != 0)
+				return; /* malformed configuration */
+#else
+			char *endptr;
+			threshold = strtoull(lessthan+2, &endptr, 0);
+			if (endptr != colon)
+				return; /* malformed configuration */
+#endif
+			/*
+			 * To live with the 32 character limit for the
+			 * comment field, we multiply the threshold by
+			 * 1024 internally.
+			 */
+			mc->mc_rotvec_threshold[nrot] = threshold * 1024;
+		}
+		rotorvector = nextrotor;
+		nrot++;
+	}
+
+#if 0
+#ifdef _KERNEL
+	{
+		int i;
+
+		for (i = 0; i < METASLAB_CLASS_ROTORS; i++) {
+			int j;
+
+			printk("rotvec[%d]: limit:%llu typemask:%02x guids:",
+			    i,
+			    mc->mc_rotvec_threshold[i],
+			    mc->mc_rotvec_categories[i]);
+			for (j = 0; j < 5 && mc->mc_rotvec_vdev_guids[i][j];
+			    j++) {
+				printk(" %llu", mc->mc_rotvec_vdev_guids[i][j]);
+			}
+			printk("\n");
+		}
+	}
+#endif
+#endif
+}
+
+int
+metaslab_vdev_rotor_category(vdev_t *vd)
+{
+	/*
+	 * Five categories, from faster to slower:
+	 *
+	 * 0: nonrot (SSD)      disk or mirror
+	 * 1: nonrot (SSD)      raidz
+	 * 2: mixed nonrot+rot  anything (raidz makes little sense)
+	 * 3: rot (HDD)         disk or mirror
+	 * 4: rot (HDD)         raidz
+	 */
+
+	if (vd->vdev_nonrot) {
+		return ((vd->vdev_ops != &vdev_raidz_ops) ? 0 : 1);
+	} else if (vd->vdev_nonrot_mix) {
+		return (2);
+	} else {
+		return ((vd->vdev_ops != &vdev_raidz_ops) ? 3 : 4);
+	}
 }
 
 metaslab_group_t *
