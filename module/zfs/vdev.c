@@ -2908,6 +2908,10 @@ vdev_get_stats_ex(vdev_t *vd, vdev_stat_t *vs, vdev_stat_ex_t *vsx)
 			vs->vs_nonrotational = VDEV_NONROTATIONAL_YES;
 		else
 			vs->vs_nonrotational = VDEV_NONROTATIONAL_NO;
+		if (vd->vdev_mg)
+			vs->vs_nrotor = vd->vdev_mg->mg_nrot;
+		else
+			vs->vs_nrotor = -1;
 	}
 
 	ASSERT(spa_config_held(vd->vdev_spa, SCL_ALL, RW_READER) != 0);

@@ -2788,6 +2788,8 @@ print_iostat_dashes(iostat_cbdata_t *cb, unsigned int force_column_width,
 
 	if (!(cb->cb_flags & IOS_ANYHISTO_M))
 		printf("  -");
+	if (!(cb->cb_flags & IOS_ANYHISTO_M))
+		printf("  -");
 
 	/* For each bit in flags */
 	for (f = flags; f; f &= ~(1ULL << idx)) {
@@ -2849,6 +2851,8 @@ print_iostat_header_impl(iostat_cbdata_t *cb, unsigned int force_column_width,
 
 	if (!(cb->cb_flags & IOS_ANYHISTO_M))
 		printf("   ");
+	if (!(cb->cb_flags & IOS_ANYHISTO_M))
+		printf("   ");
 
 	print_iostat_labels(cb, force_column_width, iostat_top_labels);
 
@@ -2856,6 +2860,8 @@ print_iostat_header_impl(iostat_cbdata_t *cb, unsigned int force_column_width,
 
 	if (!(cb->cb_flags & IOS_ANYHISTO_M))
 		printf("ssd");
+	if (!(cb->cb_flags & IOS_ANYHISTO_M))
+		printf(" RV");
 
 	print_iostat_labels(cb, force_column_width, iostat_bottom_labels);
 
@@ -3374,6 +3380,10 @@ print_vdev_stats(zpool_handle_t *zhp, const char *name, nvlist_t *oldnv,
 			(void) printf("?");
 			break;
 		}
+		if (newvs->vs_nrotor != (uint64_t) -1)
+			(void) printf("  %d", (int) newvs->vs_nrotor);
+		else
+			(void) printf("  -");
 	}
 
 	/* Calculate our scaling factor */

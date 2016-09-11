@@ -819,6 +819,7 @@ typedef struct vdev_stat {
 	uint64_t	vs_state;		/* vdev state		*/
 	uint64_t	vs_aux;			/* see vdev_aux_t	*/
 	uint64_t	vs_nonrotational;	/* nonrotational	*/
+	uint64_t	vs_nrotor;		/* allocation rotor	*/
 	uint64_t	vs_alloc;		/* space allocated	*/
 	uint64_t	vs_space;		/* total capacity	*/
 	uint64_t	vs_dspace;		/* deflated capacity	*/
