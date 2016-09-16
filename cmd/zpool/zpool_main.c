@@ -2786,6 +2786,9 @@ print_iostat_dashes(iostat_cbdata_t *cb, unsigned int force_column_width,
 			(void) printf("-");
 	}
 
+	if (!(cb->cb_flags & IOS_ANYHISTO_M))
+		printf("  -");
+
 	/* For each bit in flags */
 	for (f = flags; f; f &= ~(1ULL << idx)) {
 		unsigned int column_width;
@@ -2844,10 +2847,15 @@ print_iostat_header_impl(iostat_cbdata_t *cb, unsigned int force_column_width,
 	else
 		printf("%*s", namewidth, "");
 
+	if (!(cb->cb_flags & IOS_ANYHISTO_M))
+		printf("   ");
 
 	print_iostat_labels(cb, force_column_width, iostat_top_labels);
 
 	printf("%-*s", namewidth, title);
+
+	if (!(cb->cb_flags & IOS_ANYHISTO_M))
+		printf("ssd");
 
 	print_iostat_labels(cb, force_column_width, iostat_bottom_labels);
 
@@ -3347,6 +3355,24 @@ print_vdev_stats(zpool_handle_t *zhp, const char *name, nvlist_t *oldnv,
 				(void) printf("%*s%s%*s", depth, "", name,
 				    (int)(cb->cb_namewidth - strlen(name) -
 				    depth), "");
+		}
+		if (cb->cb_scripted)
+			printf("\t");
+		else
+			printf("  ");
+		switch (newvs->vs_nonrotational) {
+		case VDEV_NONROTATIONAL_YES:
+			(void) printf("y");
+			break;
+		case VDEV_NONROTATIONAL_MIXED:
+			(void) printf("m");
+			break;
+		case VDEV_NONROTATIONAL_NO:
+			(void) printf("n");
+			break;
+		default:
+			(void) printf("?");
+			break;
 		}
 	}
 
