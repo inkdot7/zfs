@@ -96,7 +96,7 @@ zpool \- configures ZFS storage pools
 
 .LP
 .nf
-\fB\fBzpool iostat\fR [\fB-c\fR \fBCMD\fR] [\fB-T\fR \fBd\fR | \fBu\fR] [\fB-ghHLpPvy\fR] [\fB-lq\fR]|[\fB-r\fR|-\fBw\fR]]
+\fB\fBzpool iostat\fR [\fB-c\fR \fBCMD\fR] [\fB-T\fR \fBd\fR | \fBu\fR] [\fB-ghHkLpPvy\fR] [\fB-lq\fR]|[\fB-r\fR|-\fBw\fR]]
      [[\fIpool\fR ...]|[\fIpool vdev\fR ...]|[\fIvdev\fR ...]] [\fIinterval\fR[\fIcount\fR]]\fR
 
 .fi
@@ -159,7 +159,7 @@ zpool \- configures ZFS storage pools
 
 .LP
 .nf
-\fBzpool status\fR [\fB-c\fR \fBCMD\fR] [\fB-gLPvxD\fR] [\fB-T\fR d | u] [\fIpool\fR] ... [\fIinterval\fR [\fIcount\fR]]
+\fBzpool status\fR [\fB-c\fR \fBCMD\fR] [\fB-gkLPvxD\fR] [\fB-T\fR d | u] [\fIpool\fR] ... [\fIinterval\fR [\fIcount\fR]]
 .fi
 
 .LP
@@ -1523,7 +1523,7 @@ Scan using the default search path, the libblkid cache will not be consulted.  A
 .sp
 .ne 2
 .na
-\fB\fBzpool iostat\fR [\fB-c\fR \fBCMD\fR] [\fB-T\fR \fBd\fR | \fBu\fR] [\fB-ghHLpPvy\fR] [[\fB-lq\fR]|[\fB-r\fR|\fB-w\fR]] [[\fIpool\fR ...]|[\fIpool vdev\fR ...]|[\fIvdev\fR ...]] [\fIinterval\fR[\fIcount\fR]]\fR
+\fB\fBzpool iostat\fR [\fB-c\fR \fBCMD\fR] [\fB-T\fR \fBd\fR | \fBu\fR] [\fB-ghHkLpPvy\fR] [[\fB-lq\fR]|[\fB-r\fR|\fB-w\fR]] [[\fIpool\fR ...]|[\fIpool vdev\fR ...]|[\fIvdev\fR ...]] [\fIinterval\fR[\fIcount\fR]]\fR
 
 .ad
 .sp .6
@@ -1583,6 +1583,15 @@ Display vdev GUIDs instead of the normal device names. These GUIDs can be used i
 .ad
 .RS 12n
 Scripted mode. Do not display headers, and separate fields by a single tab instead of arbitrary space.
+.RE
+
+.sp
+.ne 2
+.na
+\fB\fB-k\fR\fR
+.ad
+.RS 12n
+Display the type of device a pool or vdev is based on: ssd, hdd or file.  Mixed mirror vdevs that have both ssd (or file) and hdd members are marked "mix".  A pool is considered mixed if all members are at least mixed, i.e. no pure hdd.
 .RE
 
 .sp
@@ -2099,7 +2108,7 @@ Sets the specified property for \fInewpool\fR. See the “Properties” section 
 .sp
 .ne 2
 .na
-\fBzpool status\fR [\fB-c\fR \fBCMD\fR] [\fB-gLPvxD\fR] [\fB-T\fR d | u] [\fIpool\fR] ... [\fIinterval\fR [\fIcount\fR]]
+\fBzpool status\fR [\fB-c\fR \fBCMD\fR] [\fB-gkLPvxD\fR] [\fB-T\fR d | u] [\fIpool\fR] ... [\fIinterval\fR [\fIcount\fR]]
 .ad
 .sp .6
 .RS 4n
@@ -2131,6 +2140,15 @@ in parallel for each vdev for performance.
 .ad
 .RS 12n
 Display vdev GUIDs instead of the normal device names. These GUIDs can be used innplace of device names for the zpool detach/offline/remove/replace commands.
+.RE
+
+.sp
+.ne 2
+.na
+\fB\fB-k\fR\fR
+.ad
+.RS 12n
+Display the type of device a pool or vdev is based on: ssd, hdd or file.  Mixed mirror vdevs that have both ssd (or file) and hdd members are marked "mix".  A pool is considered mixed if all members are at least mixed, i.e. no pure hdd.
 .RE
 
 .sp

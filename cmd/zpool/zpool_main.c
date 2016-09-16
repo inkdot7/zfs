@@ -152,8 +152,9 @@ enum iostat_type {
 	IOS_DEFAULT = 0,
 	IOS_LATENCY = 1,
 	IOS_QUEUES = 2,
-	IOS_L_HISTO = 3,
-	IOS_RQ_HISTO = 4,
+	IOS_MEDIA_TYPE = 3,
+	IOS_L_HISTO = 4,
+	IOS_RQ_HISTO = 5,
 	IOS_COUNT,	/* always last element */
 };
 
@@ -161,6 +162,7 @@ enum iostat_type {
 #define	IOS_DEFAULT_M	(1ULL << IOS_DEFAULT)
 #define	IOS_LATENCY_M	(1ULL << IOS_LATENCY)
 #define	IOS_QUEUES_M	(1ULL << IOS_QUEUES)
+#define	IOS_MEDIA_TYPE_M	(1ULL << IOS_MEDIA_TYPE)
 #define	IOS_L_HISTO_M	(1ULL << IOS_L_HISTO)
 #define	IOS_RQ_HISTO_M	(1ULL << IOS_RQ_HISTO)
 
@@ -196,6 +198,9 @@ static const char *vsx_type_to_nvlist[IOS_COUNT][11] = {
 	    ZPOOL_CONFIG_VDEV_ASYNC_R_ACTIVE_QUEUE,
 	    ZPOOL_CONFIG_VDEV_ASYNC_W_ACTIVE_QUEUE,
 	    ZPOOL_CONFIG_VDEV_SCRUB_ACTIVE_QUEUE,
+	    NULL},
+	[IOS_MEDIA_TYPE] = {
+	    ZPOOL_CONFIG_VDEV_MEDIA_TYPE,
 	    NULL},
 	[IOS_RQ_HISTO] = {
 	    ZPOOL_CONFIG_VDEV_SYNC_IND_R_HISTO,
@@ -312,7 +317,7 @@ get_usage(zpool_help_t idx) {
 		    "[-R root] [-F [-n]]\n"
 		    "\t    <pool | id> [newpool]\n"));
 	case HELP_IOSTAT:
-		return (gettext("\tiostat [-c CMD] [-T d | u] [-ghHLpPvy] "
+		return (gettext("\tiostat [-c CMD] [-T d | u] [-ghHkLpPvy] "
 		    "[[-lq]|[-r|-w]]\n"
 		    "\t    [[pool ...]|[pool vdev ...]|[vdev ...]] "
 		    "[interval [count]]\n"));
@@ -335,7 +340,7 @@ get_usage(zpool_help_t idx) {
 	case HELP_SCRUB:
 		return (gettext("\tscrub [-s] <pool> ...\n"));
 	case HELP_STATUS:
-		return (gettext("\tstatus [-c CMD] [-gLPvxD] [-T d|u] [pool]"
+		return (gettext("\tstatus [-c CMD] [-gkLPvxD] [-T d|u] [pool]"
 		    " ... [interval [count]]\n"));
 	case HELP_UPGRADE:
 		return (gettext("\tupgrade\n"
@@ -1455,6 +1460,30 @@ max_width(zpool_handle_t *zhp, nvlist_t *nv, int depth, int max,
 	return (max);
 }
 
+static const char *
+media_type_mark(nvlist_t *nv)
+{
+	nvlist_t *nvx;
+	uint64_t type = VDEV_MEDIA_TYPE_UNKNOWN;
+
+	if (nvlist_lookup_nvlist(nv, ZPOOL_CONFIG_VDEV_STATS_EX, &nvx) == 0)
+		nvlist_lookup_uint64(nvx, ZPOOL_CONFIG_VDEV_MEDIA_TYPE,
+		    &type);
+
+	switch (type) {
+	case VDEV_MEDIA_TYPE_SSD:
+		return ("ssd");
+	case VDEV_MEDIA_TYPE_FILE:
+		return ("file");
+	case VDEV_MEDIA_TYPE_MIXED:
+		return ("mix");
+	case VDEV_MEDIA_TYPE_HDD:
+		return ("hdd");
+	default:
+		return ("-");
+	}
+}
+
 typedef struct spare_cbdata {
 	uint64_t	cb_guid;
 	zpool_handle_t	*cb_zhp;
@@ -1509,6 +1538,7 @@ typedef struct status_cbdata {
 	boolean_t	cb_explain;
 	boolean_t	cb_first;
 	boolean_t	cb_dedup_stats;
+	boolean_t	cb_media_type;
 	boolean_t	cb_print_status;
 	vdev_cmd_data_list_t	*vcdl;
 } status_cbdata_t;
@@ -1572,7 +1602,12 @@ print_status_config(zpool_handle_t *zhp, status_cbdata_t *cb, const char *name,
 		zfs_nicenum(vs->vs_write_errors, wbuf, sizeof (wbuf));
 		zfs_nicenum(vs->vs_checksum_errors, cbuf, sizeof (cbuf));
 		(void) printf(" %5s %5s %5s", rbuf, wbuf, cbuf);
+	} else {
+		(void) printf("                  ");
 	}
+
+	if (cb->cb_media_type)
+		(void) printf(" %4s", media_type_mark(nv));
 
 	if (nvlist_lookup_uint64(nv, ZPOOL_CONFIG_NOT_PRESENT,
 	    &notpresent) == 0) {
@@ -2628,6 +2663,7 @@ static const name_and_columns_t iostat_top_labels[][IOSTAT_MAX_LABELS] =
 	[IOS_QUEUES] = {{"syncq_read", 2}, {"syncq_write", 2},
 	    {"asyncq_read", 2}, {"asyncq_write", 2}, {"scrubq_read", 2},
 	    {NULL}},
+	[IOS_MEDIA_TYPE] = {{"", 1}, {NULL}},
 	[IOS_L_HISTO] = {{"total_wait", 2}, {"disk_wait", 2},
 	    {"sync_queue", 2}, {"async_queue", 2}, {NULL}},
 	[IOS_RQ_HISTO] = {{"sync_read", 2}, {"sync_write", 2},
@@ -2644,6 +2680,7 @@ static const name_and_columns_t iostat_bottom_labels[][IOSTAT_MAX_LABELS] =
 	    {"write"}, {"read"}, {"write"}, {"wait"}, {NULL}},
 	[IOS_QUEUES] = {{"pend"}, {"activ"}, {"pend"}, {"activ"}, {"pend"},
 	    {"activ"}, {"pend"}, {"activ"}, {"pend"}, {"activ"}, {NULL}},
+	[IOS_MEDIA_TYPE] = {{"type"}, {NULL}},
 	[IOS_L_HISTO] = {{"read"}, {"write"}, {"read"}, {"write"}, {"read"},
 	    {"write"}, {"read"}, {"write"}, {"scrub"}, {NULL}},
 	[IOS_RQ_HISTO] = {{"ind"}, {"agg"}, {"ind"}, {"agg"}, {"ind"}, {"agg"},
@@ -2706,9 +2743,10 @@ default_column_width(iostat_cbdata_t *cb, enum iostat_type type)
 		[IOS_DEFAULT] = 15, /* 1PB capacity */
 		[IOS_LATENCY] = 10, /* 1B ns = 10sec */
 		[IOS_QUEUES] = 6,   /* 1M queue entries */
+		[IOS_MEDIA_TYPE] = 4, /* type/file/ssd/hdd/mix */
 	};
 
-	if (cb->cb_literal)
+	if (cb->cb_literal || type == IOS_MEDIA_TYPE)
 		column_width = widths[type];
 
 	return (column_width);
@@ -3411,6 +3449,9 @@ print_vdev_stats(zpool_handle_t *zhp, const char *name, nvlist_t *oldnv,
 		print_iostat_latency(cb, oldnv, newnv, scale);
 	if (cb->cb_flags & IOS_QUEUES_M)
 		print_iostat_queues(cb, oldnv, newnv, scale);
+	if (cb->cb_flags & IOS_MEDIA_TYPE_M)
+		printf("%s%4s", cb->cb_scripted ? "\t" : "  ",
+		    media_type_mark(newnv));
 	if (cb->cb_flags & IOS_ANYHISTO_M) {
 		printf("\n");
 		print_iostat_histos(cb, oldnv, newnv, scale, name);
@@ -3959,7 +4000,7 @@ fsleep(float sec) {
 
 
 /*
- * zpool iostat [-c CMD] [-ghHLpPvy] [[-lq]|[-r|-w]] [-n name] [-T d|u]
+ * zpool iostat [-c CMD] [-ghHkLpPvy] [[-lq]|[-r|-w]] [-n name] [-T d|u]
  *		[[ pool ...]|[pool vdev ...]|[vdev ...]]
  *		[interval [count]]
  *
@@ -3972,6 +4013,7 @@ fsleep(float sec) {
  *	-p	Display values in parsable (exact) format.
  *	-H	Scripted mode.  Don't display headers, and separate properties
  *		by a single tab.
+ *	-k      Display type of device, e.g. solid-state or mixed.
  *	-l	Display average latency
  *	-q	Display queue depths
  *	-w	Display latency histograms
@@ -4000,6 +4042,7 @@ zpool_do_iostat(int argc, char **argv)
 	boolean_t guid = B_FALSE;
 	boolean_t follow_links = B_FALSE;
 	boolean_t full_name = B_FALSE;
+	boolean_t media_type = B_FALSE;
 	iostat_cbdata_t cb = { 0 };
 	char *cmd = NULL;
 
@@ -4010,7 +4053,7 @@ zpool_do_iostat(int argc, char **argv)
 	uint64_t unsupported_flags;
 
 	/* check options */
-	while ((c = getopt(argc, argv, "c:gLPT:vyhplqrwH")) != -1) {
+	while ((c = getopt(argc, argv, "c:gLPT:vyhpklqrwH")) != -1) {
 		switch (c) {
 		case 'c':
 			cmd = optarg;
@@ -4032,6 +4075,9 @@ zpool_do_iostat(int argc, char **argv)
 			break;
 		case 'p':
 			parsable = B_TRUE;
+			break;
+		case 'k':
+			media_type = B_TRUE;
 			break;
 		case 'l':
 			latency = B_TRUE;
@@ -4188,6 +4234,8 @@ zpool_do_iostat(int argc, char **argv)
 			cb.cb_flags |= IOS_LATENCY_M;
 		if (queues)
 			cb.cb_flags |= IOS_QUEUES_M;
+		if (media_type)
+			cb.cb_flags |= IOS_MEDIA_TYPE_M;
 	}
 
 	/*
@@ -6006,9 +6054,9 @@ status_callback(zpool_handle_t *zhp, void *data)
 			cbp->cb_namewidth = 10;
 
 		(void) printf(gettext("config:\n\n"));
-		(void) printf(gettext("\t%-*s  %-8s %5s %5s %5s\n"),
+		(void) printf(gettext("\t%-*s  %-8s %5s %5s %5s%s\n"),
 		    cbp->cb_namewidth, "NAME", "STATE", "READ", "WRITE",
-		    "CKSUM");
+		    "CKSUM", cbp->cb_media_type ? " TYPE" : "");
 		print_status_config(zhp, cbp, zpool_get_name(zhp), nvroot, 0,
 		    B_FALSE);
 
@@ -6068,10 +6116,11 @@ status_callback(zpool_handle_t *zhp, void *data)
 }
 
 /*
- * zpool status [-c CMD] [-gLPvx] [-T d|u] [pool] ... [interval [count]]
+ * zpool status [-c CMD] [-gkLPvx] [-T d|u] [pool] ... [interval [count]]
  *
  *	-c CMD	For each vdev, run command CMD
  *	-g	Display guid for individual vdev name.
+ *	-k      Display type of device, e.g. solid-state or mixed.
  *	-L	Follow links when resolving vdev path name.
  *	-P	Display full path for vdev name.
  *	-v	Display complete error logs
@@ -6092,13 +6141,16 @@ zpool_do_status(int argc, char **argv)
 	char *cmd = NULL;
 
 	/* check options */
-	while ((c = getopt(argc, argv, "c:gLPvxDT:")) != -1) {
+	while ((c = getopt(argc, argv, "c:gkLPvxDT:")) != -1) {
 		switch (c) {
 		case 'c':
 			cmd = optarg;
 			break;
 		case 'g':
 			cb.cb_name_flags |= VDEV_NAME_GUID;
+			break;
+		case 'k':
+			cb.cb_media_type = B_TRUE;
 			break;
 		case 'L':
 			cb.cb_name_flags |= VDEV_NAME_FOLLOW_LINKS;
