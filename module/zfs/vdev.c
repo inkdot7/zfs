@@ -1149,6 +1149,7 @@ vdev_open_children(vdev_t *vd)
 	taskq_t *tq;
 	int children = vd->vdev_children;
 	int c;
+	boolean_t nonrot_some;
 
 	/*
 	 * in order to handle pools on top of zvols, do the opens
@@ -1171,9 +1172,16 @@ vdev_open_children(vdev_t *vd)
 	}
 
 	vd->vdev_nonrot = B_TRUE;
+	vd->vdev_nonrot_mix = B_TRUE;
+	nonrot_some = B_FALSE;
 
-	for (c = 0; c < children; c++)
+	for (c = 0; c < children; c++) {
 		vd->vdev_nonrot &= vd->vdev_child[c]->vdev_nonrot;
+		vd->vdev_nonrot_mix &= vd->vdev_child[c]->vdev_nonrot_mix;
+		nonrot_some |= vd->vdev_child[c]->vdev_nonrot;
+	}
+	if (vd->vdev_ops == &vdev_mirror_ops)
+		vd->vdev_nonrot_mix |= nonrot_some;
 }
 
 /*
