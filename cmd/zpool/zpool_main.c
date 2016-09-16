@@ -312,7 +312,7 @@ get_usage(zpool_help_t idx) {
 		    "[-R root] [-F [-n]]\n"
 		    "\t    <pool | id> [newpool]\n"));
 	case HELP_IOSTAT:
-		return (gettext("\tiostat [-T d | u] [-ghHLpPvy] "
+		return (gettext("\tiostat [-T d | u] [-ghHkLpPvy] "
 		    "[[-lq]|[-r|-w]]\n"
 		    "\t    [[pool ...]|[pool vdev ...]|[vdev ...]] "
 		    "[interval [count]]\n"));
@@ -1455,6 +1455,31 @@ max_width(zpool_handle_t *zhp, nvlist_t *nv, int depth, int max,
 	return (max);
 }
 
+static const char *
+kind_mark(nvlist_t *nv)
+{
+	nvlist_t *nvx;
+	uint64_t kind = VDEV_KIND_UNKNOWN;
+
+	if (nvlist_lookup_nvlist(nv, ZPOOL_CONFIG_VDEV_STATS_EX, &nvx) == 0)
+		nvlist_lookup_uint64(nvx, ZPOOL_CONFIG_VDEV_KIND,
+		    &kind);
+
+	/* Note the reversed logic, the field presented is 'rotational'. */
+	switch (kind) {
+	case VDEV_KIND_SSD:
+		return ("ssd");
+	case VDEV_KIND_MIXED:
+		return ("mix");
+	case VDEV_KIND_FILE:
+		return ("file");
+	case VDEV_KIND_HDD:
+		return ("hdd");
+	default:
+		return ("?");
+	}
+}
+
 typedef struct spare_cbdata {
 	uint64_t	cb_guid;
 	zpool_handle_t	*cb_zhp;
@@ -2585,6 +2610,7 @@ typedef struct iostat_cbdata {
 	boolean_t cb_verbose;
 	boolean_t cb_literal;
 	boolean_t cb_scripted;
+	boolean_t cb_kind;
 	zpool_list_t *cb_list;
 } iostat_cbdata_t;
 
@@ -2747,7 +2773,6 @@ print_iostat_labels(iostat_cbdata_t *cb, unsigned int force_column_width,
 
 		}
 	}
-	printf("\n");
 }
 
 /*
@@ -2818,6 +2843,10 @@ print_iostat_dashes(iostat_cbdata_t *cb, unsigned int force_column_width,
 				    "--------------------");
 		}
 	}
+
+	if (cb->cb_kind)
+		printf("  ----");
+
 	printf("\n");
 }
 
@@ -2861,9 +2890,18 @@ print_iostat_header_impl(iostat_cbdata_t *cb, unsigned int force_column_width,
 
 	print_iostat_labels(cb, force_column_width, iostat_top_labels);
 
+	if (cb->cb_kind)
+		printf("      ");
+
+	printf("\n");
 	printf("%-*s", namewidth, title);
 
 	print_iostat_labels(cb, force_column_width, iostat_bottom_labels);
+
+	if (cb->cb_kind)
+		printf("  kind");
+
+	printf("\n");
 
 	print_iostat_separator_impl(cb, force_column_width);
 }
@@ -3393,8 +3431,13 @@ print_vdev_stats(zpool_handle_t *zhp, const char *name, nvlist_t *oldnv,
 		print_iostat_histos(cb, oldnv, newnv, scale, name);
 	}
 
-	if (!(cb->cb_flags & IOS_ANYHISTO_M))
+	if (!(cb->cb_flags & IOS_ANYHISTO_M)) {
+		if (cb->cb_kind) {
+			printf("%s%-4s", cb->cb_scripted ? "\t" : "  ",
+			    kind_mark(newnv));
+		}
 		printf("\n");
+	}
 
 	ret++;
 
@@ -3924,7 +3967,7 @@ fsleep(float sec) {
 
 
 /*
- * zpool iostat [-ghHLpPvy] [[-lq]|[-r|-w]] [-n name] [-T d|u]
+ * zpool iostat [-ghHkLpPvy] [[-lq]|[-r|-w]] [-n name] [-T d|u]
  *		[[ pool ...]|[pool vdev ...]|[vdev ...]]
  *		[interval [count]]
  *
@@ -3936,6 +3979,7 @@ fsleep(float sec) {
  *	-p	Display values in parsable (exact) format.
  *	-H	Scripted mode.  Don't display headers, and separate properties
  *		by a single tab.
+ *	-k      Display kind of device, e.g. solid-state or mixed.
  *	-l	Display average latency
  *	-q	Display queue depths
  *	-w	Display latency histograms
@@ -3964,6 +4008,7 @@ zpool_do_iostat(int argc, char **argv)
 	boolean_t guid = B_FALSE;
 	boolean_t follow_links = B_FALSE;
 	boolean_t full_name = B_FALSE;
+	boolean_t kind = B_FALSE;
 	iostat_cbdata_t cb = { 0 };
 
 	/* Used for printing error message */
@@ -3973,7 +4018,7 @@ zpool_do_iostat(int argc, char **argv)
 	uint64_t unsupported_flags;
 
 	/* check options */
-	while ((c = getopt(argc, argv, "gLPT:vyhplqrwH")) != -1) {
+	while ((c = getopt(argc, argv, "gLPT:vyhpklqrwH")) != -1) {
 		switch (c) {
 		case 'g':
 			guid = B_TRUE;
@@ -3992,6 +4037,9 @@ zpool_do_iostat(int argc, char **argv)
 			break;
 		case 'p':
 			parsable = B_TRUE;
+			break;
+		case 'k':
+			kind = B_TRUE;
 			break;
 		case 'l':
 			latency = B_TRUE;
@@ -4036,6 +4084,7 @@ zpool_do_iostat(int argc, char **argv)
 	cb.cb_iteration = 0;
 	cb.cb_namewidth = 0;
 	cb.cb_verbose = verbose;
+	cb.cb_kind = kind;
 
 	/* Get our interval and count values (if any) */
 	if (guid) {
