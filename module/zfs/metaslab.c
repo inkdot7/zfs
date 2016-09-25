@@ -800,8 +800,7 @@ metaslab_group_create(metaslab_class_t *mc, vdev_t *vd)
 	mg->mg_class = mc;
 	mg->mg_activation_count = 0;
 
-	/* Decide which rotor of vector to place in. */
-	mg->mg_nrot = metaslab_vdev_rotor_category(mc, mg->mg_vd);
+	mg->mg_nrot = -1;
 
 	mg->mg_taskq = taskq_create("metaslab_group_taskq", metaslab_load_pct,
 	    maxclsyspri, 10, INT_MAX, TASKQ_THREADS_CPU_PCT | TASKQ_DYNAMIC);
@@ -828,6 +827,20 @@ metaslab_group_destroy(metaslab_group_t *mg)
 }
 
 void
+metaslab_group_set_rotor_category(metaslab_group_t *mg)
+{
+	metaslab_class_t *mc = mg->mg_class;
+
+	/* Already done? */
+	if (mg->mg_nrot != -1)
+		return;
+
+	ASSERT(mg->mg_activation_count <= 0);
+
+	mg->mg_nrot = metaslab_vdev_rotor_category(mc, mg->mg_vd);
+}
+
+void
 metaslab_group_rotor_insert(metaslab_group_t *mg);
 
 void
@@ -836,6 +849,7 @@ metaslab_group_activate(metaslab_group_t *mg)
 	metaslab_class_t *mc = mg->mg_class;
 	int i;
 
+	ASSERT(mg->mg_nrot != -1);
 	ASSERT(spa_config_held(mc->mc_spa, SCL_ALLOC, RW_WRITER));
 
 	for (i = 0; i < METASLAB_CLASS_ROTORS; i++)
@@ -2325,14 +2339,6 @@ metaslab_sync_done(metaslab_t *msp, uint64_t txg)
 			msp->ms_defertree[t] = range_tree_create(NULL, msp,
 			    &msp->ms_lock);
 		}
-
-		if (mg->mg_activation_count > 0)
-			metaslab_group_rotor_remove(mg);
-		/* Re-decide which rotor of vector to place in. */
-		mg->mg_nrot =
-		    metaslab_vdev_rotor_category(mg->mg_class, mg->mg_vd);
-		if (mg->mg_activation_count > 0)
-			metaslab_group_rotor_insert(mg);
 
 		vdev_space_update(vd, mg->mg_nrot, 0, 0, msp->ms_size);
 	}

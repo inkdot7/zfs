@@ -1388,6 +1388,18 @@ vdev_open(vdev_t *vd)
 	    vdev_resilver_needed(vd, NULL, NULL))
 		spa_async_request(spa, SPA_ASYNC_RESILVER);
 
+	/*
+	 * Somewhere after vd->vdev_ops->vdev_op_open() (that calls
+	 * vdev_open_children() and thus updates vd->vdev_nonrot) and
+	 * before metaslab_class_space_update() gets called, we need
+	 * to assign the rotor category of the metaslab group.
+	 *
+	 * At this point, the metaslab group has already been created,
+	 * so go for it.
+	 */
+	if (vd->vdev_mg)
+		metaslab_group_set_rotor_category(vd->vdev_mg);
+
 	return (0);
 }
 
