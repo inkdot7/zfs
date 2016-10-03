@@ -1124,7 +1124,6 @@ vdev_open_child(void *arg)
 	vd->vdev_open_thread = curthread;
 	vd->vdev_open_error = vdev_open(vd);
 	vd->vdev_open_thread = NULL;
-	vd->vdev_parent->vdev_nonrot &= vd->vdev_nonrot;
 }
 
 static boolean_t
@@ -1151,8 +1150,6 @@ vdev_open_children(vdev_t *vd)
 	int children = vd->vdev_children;
 	int c;
 
-	vd->vdev_nonrot = B_TRUE;
-
 	/*
 	 * In order to handle pools on top of zvols, do the opens in a single
 	 * thread so that the same thread holds the spa_namespace_lock.  Also
@@ -1161,19 +1158,24 @@ vdev_open_children(vdev_t *vd)
 	if (vdev_uses_zvols(vd) || taskq_member(system_taskq, curthread)) {
 		for (c = 0; c < children; c++)
 			vdev_open_child(vd->vdev_child[c]);
-		return;
+	} else {
+		ids = kmem_zalloc(sizeof (taskqid_t) * children, KM_SLEEP);
+
+		for (c = 0; c < children; c++)
+			VERIFY3S(ids[c] = taskq_dispatch(system_taskq,
+			    vdev_open_child, vd->vdev_child[c], TQ_SLEEP),
+			    !=, 0);
+
+		for (c = 0; c < children; c++)
+			taskq_wait_id(system_taskq, ids[c]);
+
+		kmem_free(ids, sizeof (taskqid_t) * children);
 	}
 
-	ids = kmem_zalloc(sizeof (taskqid_t) * children, KM_SLEEP);
+	vd->vdev_nonrot = B_TRUE;
 
 	for (c = 0; c < children; c++)
-		VERIFY3S(ids[c] = taskq_dispatch(system_taskq, vdev_open_child,
-		    vd->vdev_child[c], TQ_SLEEP), !=, 0);
-
-	for (c = 0; c < children; c++)
-		taskq_wait_id(system_taskq, ids[c]);
-
-	kmem_free(ids, sizeof (taskqid_t) * children);
+		vd->vdev_nonrot &= vd->vdev_child[c]->vdev_nonrot;
 }
 
 /*
