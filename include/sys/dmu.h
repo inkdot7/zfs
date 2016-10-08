@@ -206,7 +206,7 @@ typedef enum dmu_object_type {
 	 * values.
 	 *
 	 * The DMU_OTN_* types do not have entries in the dmu_ot table,
-	 * use the DMU_OT_IS_METDATA() and DMU_OT_BYTESWAP() macros instead
+	 * use the DMU_OT_IS_METADATA() and DMU_OT_BYTESWAP() macros instead
 	 * of indexing into dmu_ot directly (this works for both DMU_OT_* types
 	 * and DMU_OTN_* types).
 	 */
