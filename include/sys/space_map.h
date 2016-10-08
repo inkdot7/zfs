@@ -25,6 +25,7 @@
 
 /*
  * Copyright (c) 2012, 2014 by Delphix. All rights reserved.
+ * Copyright (c) 2016, Intel Corporation.
  */
 
 #ifndef _SYS_SPACE_MAP_H
@@ -37,6 +38,20 @@
 #ifdef	__cplusplus
 extern "C" {
 #endif
+
+/*
+ * Up to 5 allocation class bins (to match existing 5 pad slots)
+ * ideally these match the order of spa_alloc_class_t entries
+ */
+typedef enum sm_alloc_bin {
+	SM_AC_REG,	/* Regular file data */
+	SM_AC_LOG,	/* LOG metadata */
+	SM_AC_MOS,	/* MOS metadata */
+	SM_AC_DDT,	/* DDT data */
+	SM_AC_DMU,	/* DMU metadata */
+	SM_AC_NUMBINS
+} sm_alloc_bin_t;
+
 
 /*
  * The size of the space map object has increased to include a histogram.
@@ -58,7 +73,7 @@ typedef struct space_map_phys {
 	uint64_t	smp_object;	/* on-disk space map object */
 	uint64_t	smp_objsize;	/* size of the object */
 	uint64_t	smp_alloc;	/* space allocated from the map */
-	uint64_t	smp_pad[5];	/* reserved */
+	uint64_t	smp_alloc_bin[SM_AC_NUMBINS]; /* per class allocated */
 
 	/*
 	 * The smp_histogram maintains a histogram of free regions. Each
@@ -86,6 +101,7 @@ typedef struct space_map {
 	dmu_buf_t	*sm_dbuf;	/* space_map_phys_t dbuf */
 	space_map_phys_t *sm_phys;	/* on-disk space map */
 	kmutex_t	*sm_lock;	/* pointer to lock that protects map */
+	uint64_t	sm_alloc_bin[SM_AC_NUMBINS]; /* synced space bins */
 } space_map_t;
 
 /*
@@ -144,6 +160,7 @@ void space_map_update(space_map_t *sm);
 uint64_t space_map_object(space_map_t *sm);
 uint64_t space_map_allocated(space_map_t *sm);
 uint64_t space_map_length(space_map_t *sm);
+uint64_t space_map_class_allocated(space_map_t *sm, sm_alloc_bin_t bin);
 
 void space_map_write(space_map_t *sm, range_tree_t *rt, maptype_t maptype,
     dmu_tx_t *tx);
@@ -156,6 +173,7 @@ int space_map_open(space_map_t **smp, objset_t *os, uint64_t object,
 void space_map_close(space_map_t *sm);
 
 int64_t space_map_alloc_delta(space_map_t *sm);
+int64_t space_map_alloc_class_delta(space_map_t *sm, sm_alloc_bin_t bin);
 
 #ifdef	__cplusplus
 }

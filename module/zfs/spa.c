@@ -27,6 +27,7 @@
  * Copyright (c) 2014 Spectra Logic Corporation, All rights reserved.
  * Copyright 2013 Saso Kiselkov. All rights reserved.
  * Copyright (c) 2016 Actifio, Inc. All rights reserved.
+ * Copyright (c) 2016, Intel Corporation.
  */
 
 /*
@@ -208,8 +209,26 @@ spa_prop_get_config(spa_t *spa, nvlist_t **nvp)
 	ASSERT(MUTEX_HELD(&spa->spa_props_lock));
 
 	if (rvd != NULL) {
-		alloc = metaslab_class_get_alloc(spa_normal_class(spa));
-		size = metaslab_class_get_space(spa_normal_class(spa));
+		alloc = metaslab_class_get_alloc(mc);
+		size = metaslab_class_get_space(mc);
+
+		/*
+		 * DJB - TBD does this need a fudge factor like for deflate?
+		 * like a compression factor or ditto copies?
+		 * use half for now to account for metadata ditto blocks
+		 */
+		if (spa_mos_class(spa)->mc_rotor != NULL) {
+			metaslab_class_t *mdmc = spa_mos_class(spa);
+
+			alloc += metaslab_class_get_alloc(mdmc) >> 1;
+			size += metaslab_class_get_space(mdmc) >> 1;
+		}
+		if (spa_dmu_class(spa)->mc_rotor != NULL) {
+			metaslab_class_t *mdmc = spa_dmu_class(spa);
+
+			alloc += metaslab_class_get_alloc(mdmc) >> 1;
+			size += metaslab_class_get_space(mdmc) >> 1;
+		}
 		spa_prop_add_list(*nvp, ZPOOL_PROP_NAME, spa_name(spa), 0, src);
 		spa_prop_add_list(*nvp, ZPOOL_PROP_SIZE, NULL, size, src);
 		spa_prop_add_list(*nvp, ZPOOL_PROP_ALLOCATED, NULL, alloc, src);
@@ -1090,13 +1109,17 @@ spa_thread(void *arg)
 static void
 spa_activate(spa_t *spa, int mode)
 {
+	int c;
+
 	ASSERT(spa->spa_state == POOL_STATE_UNINITIALIZED);
 
 	spa->spa_state = POOL_STATE_ACTIVE;
 	spa->spa_mode = mode;
 
-	spa->spa_normal_class = metaslab_class_create(spa, zfs_metaslab_ops);
-	spa->spa_log_class = metaslab_class_create(spa, zfs_metaslab_ops);
+	for (c = 0; c < SPA_CLASS_NUMTYPES; c++) {
+		spa->spa_alloc_class[c] = metaslab_class_create(spa,
+		    zfs_metaslab_ops, c);
+	}
 
 	/* Try to create a covering process */
 	mutex_enter(&spa->spa_proc_lock);
@@ -1182,7 +1205,7 @@ spa_activate(spa_t *spa, int mode)
 static void
 spa_deactivate(spa_t *spa)
 {
-	int t, q;
+	int t, q, c;
 
 	ASSERT(spa->spa_sync_on == B_FALSE);
 	ASSERT(spa->spa_dsl_pool == NULL);
@@ -1216,11 +1239,10 @@ spa_deactivate(spa_t *spa)
 		}
 	}
 
-	metaslab_class_destroy(spa->spa_normal_class);
-	spa->spa_normal_class = NULL;
-
-	metaslab_class_destroy(spa->spa_log_class);
-	spa->spa_log_class = NULL;
+	for (c = 0; c < SPA_CLASS_NUMTYPES; c++) {
+		metaslab_class_destroy(spa->spa_alloc_class[c]);
+		spa->spa_alloc_class[c] = NULL;
+	}
 
 	/*
 	 * If this was part of an import or the open otherwise failed, we may
@@ -3751,7 +3773,7 @@ spa_create(const char *pool, nvlist_t *nvroot, nvlist_t *props,
 	int error = 0;
 	uint64_t txg = TXG_INITIAL;
 	nvlist_t **spares, **l2cache;
-	uint_t nspares, nl2cache;
+	uint_t nspares, nl2cache, num_dedicated = 0;
 	uint64_t version, obj;
 	boolean_t has_features;
 	nvpair_t *elem;
@@ -3842,8 +3864,19 @@ spa_create(const char *pool, nvlist_t *nvroot, nvlist_t *props,
 	    (error = spa_validate_aux(spa, nvroot, txg,
 	    VDEV_ALLOC_ADD)) == 0) {
 		for (c = 0; c < rvd->vdev_children; c++) {
-			vdev_metaslab_set_size(rvd->vdev_child[c]);
-			vdev_expand(rvd->vdev_child[c], txg);
+			vdev_t *vd = rvd->vdev_child[c];
+
+			vdev_metaslab_set_size(vd);
+			vdev_expand(vd, txg);
+
+			/*
+			 * count any dedicated metadata classes
+			 */
+			if (vd->vdev_mg->mg_class[SPA_CLASS_DDT] != NULL ||
+			    vd->vdev_mg->mg_class[SPA_CLASS_DMU] != NULL ||
+			    vd->vdev_mg->mg_class[SPA_CLASS_MOS] != NULL) {
+				num_dedicated++;
+			}
 		}
 	}
 
@@ -3972,6 +4005,19 @@ spa_create(const char *pool, nvlist_t *nvroot, nvlist_t *props,
 	if (props != NULL) {
 		spa_configfile_set(spa, props, B_FALSE);
 		spa_sync_props(props, tx);
+	}
+
+	/*
+	 * If a vdev with a dedicated category was included, then
+	 * account for it now. Note we can only increment feature,
+	 * not directly assign a reference count.
+	 */
+	if (num_dedicated > 0 &&
+	    spa_feature_is_enabled(spa, SPA_FEATURE_METADATA_ALLOC_CLASSES)) {
+		for (i = 0; i < num_dedicated; i++) {
+			spa_feature_incr(spa,
+			    SPA_FEATURE_METADATA_ALLOC_CLASSES, tx);
+		}
 	}
 
 	dmu_tx_commit(tx);
@@ -5104,6 +5150,9 @@ spa_vdev_split_mirror(spa_t *spa, char *newname, nvlist_t *config,
 		    vml[c]->vdev_ishole ||
 		    vml[c]->vdev_isspare ||
 		    vml[c]->vdev_isl2cache ||
+		    vml[c]->vdev_mg->mg_class[SPA_CLASS_DDT] != NULL ||
+		    vml[c]->vdev_mg->mg_class[SPA_CLASS_DMU] != NULL ||
+		    vml[c]->vdev_mg->mg_class[SPA_CLASS_MOS] != NULL ||
 		    !vdev_writeable(vml[c]) ||
 		    vml[c]->vdev_children != 0 ||
 		    vml[c]->vdev_state != VDEV_STATE_HEALTHY ||
@@ -5825,12 +5874,23 @@ spa_async_thread(spa_t *spa)
 	 * See if the config needs to be updated.
 	 */
 	if (tasks & SPA_ASYNC_CONFIG_UPDATE) {
-		uint64_t old_space, new_space;
+		uint64_t old_space = 0, new_space = 0;
+		int c;
 
 		mutex_enter(&spa_namespace_lock);
-		old_space = metaslab_class_get_space(spa_normal_class(spa));
+
+		for (c = 0; c < SPA_CLASS_NUMTYPES; c++) {
+			old_space += metaslab_class_get_space(
+			    spa->spa_alloc_class[c]);
+		}
+
 		spa_config_update(spa, SPA_CONFIG_UPDATE_POOL);
-		new_space = metaslab_class_get_space(spa_normal_class(spa));
+
+		for (c = 0; c < SPA_CLASS_NUMTYPES; c++) {
+			new_space += metaslab_class_get_space(
+			    spa->spa_alloc_class[c]);
+		}
+
 		mutex_exit(&spa_namespace_lock);
 
 		/*

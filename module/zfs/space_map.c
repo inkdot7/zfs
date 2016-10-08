@@ -24,6 +24,7 @@
  */
 /*
  * Copyright (c) 2012, 2014 by Delphix. All rights reserved.
+ * Copyright (c) 2016, Intel Corporation.
  */
 
 #include <sys/zfs_context.h>
@@ -359,6 +360,7 @@ space_map_open(space_map_t **smp, objset_t *os, uint64_t object,
 {
 	space_map_t *sm;
 	int error;
+	uint_t b;
 
 	ASSERT(*smp == NULL);
 	ASSERT(os != NULL);
@@ -373,7 +375,11 @@ space_map_open(space_map_t **smp, objset_t *os, uint64_t object,
 	sm->sm_os = os;
 	sm->sm_object = object;
 	sm->sm_length = 0;
-	sm->sm_alloc = 0;
+	sm->sm_alloc = 0;	/* synced space allocated */
+
+	for (b = 0; b < SM_AC_NUMBINS; b++)
+		sm->sm_alloc_bin[b] = 0;
+
 	sm->sm_blksz = 0;
 	sm->sm_dbuf = NULL;
 	sm->sm_phys = NULL;
@@ -458,6 +464,8 @@ space_map_truncate(space_map_t *sm, dmu_tx_t *tx)
 void
 space_map_update(space_map_t *sm)
 {
+	uint_t b;
+
 	if (sm == NULL)
 		return;
 
@@ -465,6 +473,9 @@ space_map_update(space_map_t *sm)
 
 	sm->sm_alloc = sm->sm_phys->smp_alloc;
 	sm->sm_length = sm->sm_phys->smp_objsize;
+	/* update to what was synced */
+	for (b = 0; b < SM_AC_NUMBINS; b++)
+		sm->sm_alloc_bin[b] = sm->sm_phys->smp_alloc_bin[b];
 }
 
 uint64_t
@@ -529,6 +540,25 @@ space_map_allocated(space_map_t *sm)
 	return (sm != NULL ? sm->sm_alloc : 0);
 }
 
+uint64_t
+space_map_class_allocated(space_map_t *sm, sm_alloc_bin_t bin)
+{
+	if (sm == NULL)
+		return (0);
+
+	switch (bin) {
+	case SM_AC_DDT:
+	case SM_AC_DMU:
+	case SM_AC_MOS:
+	case SM_AC_LOG:
+	case SM_AC_REG:
+		return (sm->sm_alloc_bin[bin]);
+	default:
+		panic("Invalid sm_alloc_bin_t bin");
+		return (0);
+	}
+}
+
 /*
  * Returns the already synced, on-disk length;
  */
@@ -548,4 +578,26 @@ space_map_alloc_delta(space_map_t *sm)
 		return (0);
 	ASSERT(sm->sm_dbuf != NULL);
 	return (sm->sm_phys->smp_alloc - space_map_allocated(sm));
+}
+
+int64_t
+space_map_alloc_class_delta(space_map_t *sm, sm_alloc_bin_t bin)
+{
+	if (sm == NULL)
+		return (0);
+
+	ASSERT(sm->sm_dbuf != NULL);
+
+	switch (bin) {
+	case SM_AC_DDT:
+	case SM_AC_DMU:
+	case SM_AC_MOS:
+	case SM_AC_LOG:
+	case SM_AC_REG:
+		return (sm->sm_phys->smp_alloc_bin[bin] -
+		    sm->sm_alloc_bin[bin]);
+	default:
+		panic("Invalid sm_alloc_bin_t bin");
+		return (0);
+	}
 }

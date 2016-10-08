@@ -24,6 +24,7 @@
  * Copyright 2015 Nexenta Systems, Inc.  All rights reserved.
  * Copyright (c) 2014 Spectra Logic Corporation, All rights reserved.
  * Copyright 2013 Saso Kiselkov. All rights reserved.
+ * Copyright (c) 2016, Intel Corporation.
  */
 
 #include <sys/zfs_context.h>
@@ -32,6 +33,7 @@
 #include <sys/zio_checksum.h>
 #include <sys/zio_compress.h>
 #include <sys/dmu.h>
+#include <sys/dmu_objset.h>
 #include <sys/dmu_tx.h>
 #include <sys/zap.h>
 #include <sys/zil.h>
@@ -1052,7 +1054,9 @@ void
 spa_vdev_config_exit(spa_t *spa, vdev_t *vd, uint64_t txg, int error, char *tag)
 {
 	int config_changed = B_FALSE;
-
+#ifdef ZFS_DEBUG
+	int c;
+#endif
 	ASSERT(MUTEX_HELD(&spa_namespace_lock));
 	ASSERT(txg > spa_last_synced_txg(spa));
 
@@ -1071,9 +1075,13 @@ spa_vdev_config_exit(spa_t *spa, vdev_t *vd, uint64_t txg, int error, char *tag)
 	/*
 	 * Verify the metaslab classes.
 	 */
-	ASSERT(metaslab_class_validate(spa_normal_class(spa)) == 0);
-	ASSERT(metaslab_class_validate(spa_log_class(spa)) == 0);
-
+#ifdef ZFS_DEBUG
+	for (c = 0; c < SPA_CLASS_NUMTYPES; c++) {
+		if (spa->spa_alloc_class[c] == NULL)
+			continue;
+		ASSERT(metaslab_class_validate(spa->spa_alloc_class[c]) == 0);
+	}
+#endif
 	spa_config_exit(spa, SCL_ALL, spa);
 
 	/*
@@ -1617,6 +1625,10 @@ spa_get_dspace(spa_t *spa)
 void
 spa_update_dspace(spa_t *spa)
 {
+	/*
+	 * DJB - TBD if other classes should contribute here
+	 * or if dspace should be tracked per allocation class
+	 */
 	spa->spa_dspace = metaslab_class_get_dspace(spa_normal_class(spa)) +
 	    ddt_get_dedup_dspace(spa);
 }
@@ -1652,13 +1664,31 @@ spa_deflate(spa_t *spa)
 metaslab_class_t *
 spa_normal_class(spa_t *spa)
 {
-	return (spa->spa_normal_class);
+	return (spa->spa_alloc_class[SPA_CLASS_GENERAL]);
 }
 
 metaslab_class_t *
 spa_log_class(spa_t *spa)
 {
-	return (spa->spa_log_class);
+	return (spa->spa_alloc_class[SPA_CLASS_LOG]);
+}
+
+metaslab_class_t *
+spa_mos_class(spa_t *spa)
+{
+	return (spa->spa_alloc_class[SPA_CLASS_MOS]);
+}
+
+metaslab_class_t *
+spa_ddt_class(spa_t *spa)
+{
+	return (spa->spa_alloc_class[SPA_CLASS_DDT]);
+}
+
+metaslab_class_t *
+spa_dmu_class(spa_t *spa)
+{
+	return (spa->spa_alloc_class[SPA_CLASS_DMU]);
 }
 
 void
@@ -1873,7 +1903,7 @@ spa_fini(void)
 boolean_t
 spa_has_slogs(spa_t *spa)
 {
-	return (spa->spa_log_class->mc_rotor != NULL);
+	return (spa_log_class(spa)->mc_rotor != NULL);
 }
 
 spa_log_state_t
@@ -2006,6 +2036,38 @@ spa_maxdnodesize(spa_t *spa)
 		return (DNODE_MIN_SIZE);
 }
 
+/*
+ * Locate an appropriate allocation class
+ */
+metaslab_class_t *
+spa_preferred_class(spa_t *spa, uint64_t size, int objtype, int level,
+    uint64_t objset)
+{
+	if (DMU_OT_IS_DDT(objtype)) {
+		if (spa->spa_alloc_class[SPA_CLASS_DDT]->mc_rotor != NULL)
+			return (spa_ddt_class(spa));
+		else
+			return (spa_normal_class(spa));
+	}
+	if (DMU_OT_IS_ZIL(objtype)) {
+		if (spa->spa_alloc_class[SPA_CLASS_LOG]->mc_rotor != NULL)
+			return (spa_log_class(spa));
+		else
+			return (spa_normal_class(spa));
+	}
+	if (DMU_OT_IS_METADATA(objtype) || level > 0) {
+		if (objset == DMU_META_OBJSET &&
+		    spa->spa_alloc_class[SPA_CLASS_MOS]->mc_rotor != NULL) {
+			return (spa_mos_class(spa));
+		} else if (objset != DMU_META_OBJSET &&
+		    spa->spa_alloc_class[SPA_CLASS_DMU]->mc_rotor != NULL) {
+			return (spa_dmu_class(spa));
+		}
+	}
+
+	return (spa_normal_class(spa));
+}
+
 #if defined(_KERNEL) && defined(HAVE_SPL)
 /* Namespace manipulation */
 EXPORT_SYMBOL(spa_lookup);
@@ -2054,6 +2116,9 @@ EXPORT_SYMBOL(spa_update_dspace);
 EXPORT_SYMBOL(spa_deflate);
 EXPORT_SYMBOL(spa_normal_class);
 EXPORT_SYMBOL(spa_log_class);
+EXPORT_SYMBOL(spa_ddt_class);
+EXPORT_SYMBOL(spa_dmu_class);
+EXPORT_SYMBOL(spa_mos_class);
 EXPORT_SYMBOL(spa_max_replication);
 EXPORT_SYMBOL(spa_prev_software_version);
 EXPORT_SYMBOL(spa_get_failmode);
@@ -2084,6 +2149,7 @@ EXPORT_SYMBOL(spa_has_slogs);
 EXPORT_SYMBOL(spa_is_root);
 EXPORT_SYMBOL(spa_writeable);
 EXPORT_SYMBOL(spa_mode);
+EXPORT_SYMBOL(spa_preferred_class);
 
 EXPORT_SYMBOL(spa_namespace_lock);
 

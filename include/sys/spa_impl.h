@@ -25,6 +25,7 @@
  * Copyright (c) 2014 Spectra Logic Corporation, All rights reserved.
  * Copyright 2013 Saso Kiselkov. All rights reserved.
  * Copyright (c) 2016 Actifio, Inc. All rights reserved.
+ * Copyright (c) 2016, Intel Corporation.
  */
 
 #ifndef _SYS_SPA_IMPL_H
@@ -144,8 +145,7 @@ struct spa {
 	spa_taskqs_t	spa_zio_taskq[ZIO_TYPES][ZIO_TASKQ_TYPES];
 	dsl_pool_t	*spa_dsl_pool;
 	boolean_t	spa_is_initializing;	/* true while opening pool */
-	metaslab_class_t *spa_normal_class;	/* normal data class */
-	metaslab_class_t *spa_log_class;	/* intent log data class */
+	metaslab_class_t *spa_alloc_class[SPA_CLASS_NUMTYPES]; /* distinct */
 	uint64_t	spa_first_txg;		/* first txg after spa_open() */
 	uint64_t	spa_final_txg;		/* txg of export/destroy */
 	uint64_t	spa_freeze_txg;		/* freeze pool at this txg */

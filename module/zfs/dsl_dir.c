@@ -1178,6 +1178,8 @@ dsl_dir_tempreserve_impl(dsl_dir_t *dd, uint64_t asize, boolean_t netfree,
 	 * but still within the pool's allocation slop.  In cases where
 	 * we're very close to full, this will allow a steady trickle of
 	 * removes to get through.
+	 *
+	 * DJB - TBD account for metadata class space in quota calculation
 	 */
 	if (dd->dd_parent == NULL) {
 		spa_t *spa = dd->dd_pool->dp_spa;

@@ -708,6 +708,9 @@ make_leaf_vdev(nvlist_t *props, const char *arg, uint64_t is_log)
 	verify(nvlist_add_string(vdev, ZPOOL_CONFIG_PATH, path) == 0);
 	verify(nvlist_add_string(vdev, ZPOOL_CONFIG_TYPE, type) == 0);
 	verify(nvlist_add_uint64(vdev, ZPOOL_CONFIG_IS_LOG, is_log) == 0);
+	if (is_log)
+		verify(nvlist_add_string(vdev, ZPOOL_CONFIG_ALLOC_CLASSES,
+		    VDEV_CLASS_LOG) == 0);
 	if (strcmp(type, VDEV_TYPE_DISK) == 0)
 		verify(nvlist_add_uint64(vdev, ZPOOL_CONFIG_WHOLE_DISK,
 		    (uint64_t)wholedisk) == 0);
@@ -752,6 +755,9 @@ make_leaf_vdev(nvlist_t *props, const char *arg, uint64_t is_log)
  *
  * 	Otherwise, make sure that the current spec (if there is one) and the new
  * 	spec have consistent replication levels.
+ *
+ * 	If there is no current spec (create), make sure new spec has at least
+ *	one general purpose vdev.
  */
 typedef struct replication_level {
 	char *zprl_type;
@@ -774,7 +780,7 @@ get_replication(nvlist_t *nvroot, boolean_t fatal)
 	nvlist_t **child;
 	uint_t c, children;
 	nvlist_t *nv;
-	char *type;
+	char *type, *classes;
 	replication_level_t lastrep = { 0 }, rep, *ret;
 	boolean_t dontreport;
 
@@ -795,6 +801,9 @@ get_replication(nvlist_t *nvroot, boolean_t fatal)
 		 */
 		(void) nvlist_lookup_uint64(nv, ZPOOL_CONFIG_IS_LOG, &is_log);
 		if (is_log)
+			continue;
+		if (nvlist_lookup_string(nv, ZPOOL_CONFIG_ALLOC_CLASSES,
+		    &classes) == 0)
 			continue;
 
 		verify(nvlist_lookup_string(nv, ZPOOL_CONFIG_TYPE,
@@ -956,7 +965,7 @@ get_replication(nvlist_t *nvroot, boolean_t fatal)
 		/*
 		 * At this point, we have the replication of the last toplevel
 		 * vdev in 'rep'.  Compare it to 'lastrep' to see if its
-		 * different.
+		 * different. Skip checks involving dedicated top-level vdevs.
 		 */
 		if (lastrep.zprl_type != NULL) {
 			if (strcmp(lastrep.zprl_type, rep.zprl_type) != 0) {
@@ -1364,6 +1373,88 @@ is_device_in_use(nvlist_t *config, nvlist_t *nv, boolean_t force,
 	return (anyinuse);
 }
 
+/*
+ * canonical form is lowercase and in alphabetical order
+ */
+const char * normalized_classes[] = {
+	"ddt",
+	"dmu",
+	"ddt,dmu",
+	"log",
+	"ddt,log",
+	"dmu,log",
+	"ddt,dmu,log",
+	"mos",
+	"ddt,mos",
+	"dmu,mos",
+	"ddt,dmu,mos",	/* 'metadata' alias */
+	"log,mos",
+	"ddt,log,mos",
+	"dmu,log,mos",
+	"ddt,dmu,log,mos"
+};
+
+static const char *
+validate_class_str(const char *class)
+{
+	char *src, *str, *token;
+	int log = 0, mos = 0, ddt = 0, dmu = 0;
+
+	/*
+	 * treat 'metadata' as an alias
+	 */
+	if (strcmp(class, "metadata") == 0)
+		return (normalized_classes[10]);
+
+	str = src = strdup(class);
+
+	while ((token = strtok(str, ",")) != NULL) {
+		str = NULL;
+
+		if (strcmp(token, "log") == 0) {
+			if (log++) {
+				class = NULL;
+				break;
+			}
+			continue;
+		}
+		if (strcmp(token, "mos") == 0) {
+			if (mos++) {
+				class = NULL;
+				break;
+			}
+			continue;
+		}
+		if (strcmp(token, "ddt") == 0) {
+			if (ddt++) {
+				class = NULL;
+				break;
+			}
+			continue;
+		}
+		if (strcmp(token, "dmu") == 0) {
+			if (dmu++) {
+				class = NULL;
+				break;
+			}
+			continue;
+		}
+
+		class = NULL;	/* not a class, probably a device */
+		break;
+	}
+
+	/* normalize classes to a canonical form */
+	if (class != NULL) {
+		int x = ddt | (dmu << 1) | (log << 2) | (mos << 3);
+
+		class = normalized_classes[x - 1];
+	}
+
+	free(src);
+	return (class);
+}
+
 static const char *
 is_grouping(const char *type, int *mindev, int *maxdev)
 {
@@ -1418,6 +1509,12 @@ is_grouping(const char *type, int *mindev, int *maxdev)
 		return (VDEV_TYPE_L2CACHE);
 	}
 
+	if ((type = validate_class_str(type)) != NULL) {
+		if (mindev != NULL)
+			*mindev = 2;
+		return (type);
+	}
+
 	return (NULL);
 }
 
@@ -1427,12 +1524,14 @@ is_grouping(const char *type, int *mindev, int *maxdev)
  * Note: we don't bother freeing anything in the error paths
  * because the program is just going to exit anyway.
  */
-nvlist_t *
+static nvlist_t *
 construct_spec(nvlist_t *props, int argc, char **argv)
 {
 	nvlist_t *nvroot, *nv, **top, **spares, **l2cache;
-	int t, toplevels, mindev, maxdev, nspares, nlogs, nl2cache;
+	int t, toplevels, mindev, maxdev;
+	int nspares, nlogs, nl2cache;
 	const char *type;
+	char class[32];
 	uint64_t is_log;
 	boolean_t seen_logs;
 
@@ -1446,6 +1545,7 @@ construct_spec(nvlist_t *props, int argc, char **argv)
 	is_log = B_FALSE;
 	seen_logs = B_FALSE;
 	nvroot = NULL;
+	class[0] = '\0';
 
 	while (argc > 0) {
 		nv = NULL;
@@ -1457,6 +1557,7 @@ construct_spec(nvlist_t *props, int argc, char **argv)
 		if ((type = is_grouping(argv[0], &mindev, &maxdev)) != NULL) {
 			nvlist_t **child = NULL;
 			int c, children = 0;
+			boolean_t is_aux = B_FALSE;
 
 			if (strcmp(type, VDEV_TYPE_SPARE) == 0) {
 				if (spares != NULL) {
@@ -1467,6 +1568,8 @@ construct_spec(nvlist_t *props, int argc, char **argv)
 					goto spec_out;
 				}
 				is_log = B_FALSE;
+				is_aux = B_TRUE;
+				class[0] = '\0';
 			}
 
 			if (strcmp(type, VDEV_TYPE_LOG) == 0) {
@@ -1479,6 +1582,7 @@ construct_spec(nvlist_t *props, int argc, char **argv)
 				}
 				seen_logs = B_TRUE;
 				is_log = B_TRUE;
+				class[0] = '\0';
 				argc--;
 				argv++;
 				/*
@@ -1497,6 +1601,26 @@ construct_spec(nvlist_t *props, int argc, char **argv)
 					goto spec_out;
 				}
 				is_log = B_FALSE;
+				is_aux = B_TRUE;
+				class[0] = '\0';
+			}
+
+			/*
+			 * last grouping, if it is not a mirror or
+			 * raidz then it must be a class designation
+			 */
+			if (!is_aux &&
+			    strcmp(type, VDEV_TYPE_RAIDZ) != 0 &&
+			    strcmp(type, VDEV_TYPE_MIRROR) != 0) {
+				(void) stpncpy(class, type, sizeof (class));
+				argc--;
+				argv++;
+				/*
+				 * A class designation is not a real grouping
+				 * device. We just set class and continue.
+				 */
+				is_log = B_FALSE;
+				continue;
 			}
 
 			if (is_log) {
@@ -1508,6 +1632,16 @@ construct_spec(nvlist_t *props, int argc, char **argv)
 					goto spec_out;
 				}
 				nlogs++;
+			}
+
+			if (class[0] != '\0') {
+				if (strcmp(type, VDEV_TYPE_MIRROR) != 0) {
+					(void) fprintf(stderr,
+					    gettext("invalid vdev "
+					    "specification: unsupported '%s' "
+					    "class device: %s\n"), class, type);
+					goto spec_out;
+				}
 			}
 
 			for (c = 1; c < argc; c++) {
@@ -1567,6 +1701,18 @@ construct_spec(nvlist_t *props, int argc, char **argv)
 				    type) == 0);
 				verify(nvlist_add_uint64(nv,
 				    ZPOOL_CONFIG_IS_LOG, is_log) == 0);
+
+				if (is_log) {
+					verify(nvlist_add_string(nv,
+					    ZPOOL_CONFIG_ALLOC_CLASSES,
+					    VDEV_CLASS_LOG) == 0);
+				}
+				if (class[0] != '\0') {
+					verify(nvlist_add_string(nv,
+					    ZPOOL_CONFIG_ALLOC_CLASSES,
+					    class) == 0);
+				}
+
 				if (strcmp(type, VDEV_TYPE_RAIDZ) == 0) {
 					verify(nvlist_add_uint64(nv,
 					    ZPOOL_CONFIG_NPARITY,
@@ -1591,6 +1737,12 @@ construct_spec(nvlist_t *props, int argc, char **argv)
 
 			if (is_log)
 				nlogs++;
+			if (class[0] != '\0') {
+				(void) fprintf(stderr,
+				    gettext("invalid vdev specification: '%s' "
+				    "class expects mirror\n"), class);
+				goto spec_out;
+			}
 			argc--;
 			argv++;
 		}
@@ -1691,6 +1843,31 @@ split_mirror_vdev(zpool_handle_t *zhp, char *newname, nvlist_t *props,
 	return (newroot);
 }
 
+static int
+num_normal_vdevs(nvlist_t *nvroot)
+{
+	nvlist_t **top;
+	uint_t t, toplevels, normal = 0;
+
+	verify(nvlist_lookup_nvlist_array(nvroot, ZPOOL_CONFIG_CHILDREN,
+	    &top, &toplevels) == 0);
+
+	for (t = 0; t < toplevels; t++) {
+		char *classes;
+		uint64_t log = B_FALSE;
+
+		(void) nvlist_lookup_uint64(top[t], ZPOOL_CONFIG_IS_LOG, &log);
+		if (log)
+			continue;
+		if (nvlist_lookup_string(top[t], ZPOOL_CONFIG_ALLOC_CLASSES,
+		    &classes) == 0)
+			continue;
+		normal++;
+	}
+
+	return (normal);
+}
+
 /*
  * Get and validate the contents of the given vdev specification.  This ensures
  * that the nvlist returned is well-formed, that all the devices exist, and that
@@ -1739,6 +1916,17 @@ make_root_vdev(zpool_handle_t *zhp, nvlist_t *props, int force, int check_rep,
 	 * catch changes against the existing replication level.
 	 */
 	if (check_rep && check_replication(poolconfig, newroot) != 0) {
+		nvlist_free(newroot);
+		return (NULL);
+	}
+
+	if (poolconfig == NULL && num_normal_vdevs(newroot) == 0) {
+		/*
+		 * On pool create the new vdev spec must have a normal class.
+		 */
+		vdev_error(gettext("at least one general top-level vdev must "
+		    "be specified\n"));
+
 		nvlist_free(newroot);
 		return (NULL);
 	}

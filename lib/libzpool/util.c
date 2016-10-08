@@ -20,6 +20,7 @@
  */
 /*
  * Copyright (c) 2005, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2016, Intel Corporation.
  */
 
 #include <assert.h>
@@ -74,7 +75,6 @@ show_vdev_stats(const char *desc, const char *ctype, nvlist_t *nv, int indent)
 	uint_t c, children;
 	char used[6], avail[6];
 	char rops[6], wops[6], rbytes[6], wbytes[6], rerr[6], werr[6], cerr[6];
-	char *prefix = "";
 
 	v0 = umem_zalloc(sizeof (*v0), UMEM_NOFAIL);
 
@@ -86,14 +86,27 @@ show_vdev_stats(const char *desc, const char *ctype, nvlist_t *nv, int indent)
 	}
 
 	if (desc != NULL) {
+		char *suffix = "", *classes = NULL;
+		char class_suffix[32];
+
 		(void) nvlist_lookup_uint64(nv, ZPOOL_CONFIG_IS_LOG, &is_log);
-
-		if (is_log)
-			prefix = "log ";
-
+		(void) nvlist_lookup_string(nv, ZPOOL_CONFIG_ALLOC_CLASSES,
+		    &classes);
 		if (nvlist_lookup_uint64_array(nv, ZPOOL_CONFIG_VDEV_STATS,
 		    (uint64_t **)&vs, &c) != 0)
 			vs = v0;
+
+		if (classes != NULL) {
+			if (strcmp(classes, "ddt,dmu,mos") == 0)
+				classes = "metadata";	/* alias */
+			(void) snprintf(class_suffix, sizeof (class_suffix),
+			    ": %s", classes);
+			suffix = class_suffix;
+		} else if (is_log) {
+			suffix = ": log";
+		} else if (indent > 0 && vs->vs_space) {
+			suffix = ": any";
+		}
 
 		sec = MAX(1, vs->vs_timestamp / NANOSEC);
 
@@ -109,9 +122,9 @@ show_vdev_stats(const char *desc, const char *ctype, nvlist_t *nv, int indent)
 
 		(void) printf("%*s%s%*s%*s%*s %5s %5s %5s %5s %5s %5s %5s\n",
 		    indent, "",
-		    prefix,
-		    (int)(indent+strlen(prefix)-25-(vs->vs_space ? 0 : 12)),
 		    desc,
+		    (int)(indent+strlen(desc)-25-(vs->vs_space ? 0 : 12)),
+		    suffix,
 		    vs->vs_space ? 6 : 0, vs->vs_space ? used : "",
 		    vs->vs_space ? 6 : 0, vs->vs_space ? avail : "",
 		    rops, wops, rbytes, wbytes, rerr, werr, cerr);

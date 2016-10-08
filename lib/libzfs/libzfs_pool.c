@@ -23,6 +23,7 @@
  * Copyright 2015 Nexenta Systems, Inc.  All rights reserved.
  * Copyright (c) 2005, 2010, Oracle and/or its affiliates. All rights reserved.
  * Copyright (c) 2011, 2014 by Delphix. All rights reserved.
+ * Copyright (c) 2016, Intel Corporation.
  */
 
 #include <ctype.h>
@@ -3449,7 +3450,8 @@ zpool_vdev_name(libzfs_handle_t *hdl, zpool_handle_t *zhp, nvlist_t *nv,
 	char *path, *type, *env;
 	uint64_t value;
 	char buf[PATH_BUF_LEN];
-	char tmpbuf[PATH_BUF_LEN];
+	char tmpbuf[PATH_BUF_LEN];	/* type id case */
+	char classbuf[PATH_BUF_LEN];	/* class case */
 
 	env = getenv("ZPOOL_VDEV_NAME_PATH");
 	if (env && (strtoul(env, NULL, 0) > 0 ||
@@ -3544,7 +3546,12 @@ zpool_vdev_name(libzfs_handle_t *hdl, zpool_handle_t *zhp, nvlist_t *nv,
 		 */
 		if (nvlist_lookup_uint64(nv, ZPOOL_CONFIG_WHOLE_DISK, &value)
 		    == 0 && value && !(name_flags & VDEV_NAME_PATH)) {
-			return (zfs_strip_partition(hdl, path));
+			char *sp = zfs_strip_partition(hdl, path);
+
+			/* copy locally in case alloc class name is needed */
+			strlcpy(buf, sp, sizeof (buf));
+			path = buf;
+			free(sp);
 		}
 	} else {
 		verify(nvlist_lookup_string(nv, ZPOOL_CONFIG_TYPE, &path) == 0);
@@ -3572,6 +3579,21 @@ zpool_vdev_name(libzfs_handle_t *hdl, zpool_handle_t *zhp, nvlist_t *nv,
 			    path, (u_longlong_t)id);
 			path = tmpbuf;
 		}
+	}
+	/*
+	 * if requested add classes info for top-level vdevs
+	 */
+	if ((name_flags & VDEV_NAME_GUID) == 0 &&
+	    (name_flags & VDEV_NAME_ALLOC_CLASS) &&
+	    (nvlist_exists(nv, ZPOOL_CONFIG_ALLOC_CLASSES) ||
+	    nvlist_lookup_uint64(nv, ZPOOL_CONFIG_METASLAB_SHIFT,
+	    &value) == 0)) {
+		type = VDEV_CLASS_ANY;
+		(void) nvlist_lookup_string(nv, ZPOOL_CONFIG_ALLOC_CLASSES,
+		    &type);
+		(void) snprintf(classbuf, sizeof (classbuf), "%s {%s}",
+		    path, type);
+		path = classbuf;
 	}
 
 	return (zfs_strdup(hdl, path));

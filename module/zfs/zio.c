@@ -22,6 +22,7 @@
  * Copyright (c) 2005, 2010, Oracle and/or its affiliates. All rights reserved.
  * Copyright (c) 2011, 2016 by Delphix. All rights reserved.
  * Copyright (c) 2011 Nexenta Systems, Inc. All rights reserved.
+ * Copyright (c) 2016, Intel Corporation.
  */
 
 #include <sys/sysmacros.h>
@@ -2120,6 +2121,7 @@ static int
 zio_write_gang_block(zio_t *pio)
 {
 	spa_t *spa = pio->io_spa;
+	metaslab_class_t *mc;
 	blkptr_t *bp = pio->io_bp;
 	zio_t *gio = pio->io_gang_leader;
 	zio_t *zio;
@@ -2133,8 +2135,11 @@ zio_write_gang_block(zio_t *pio)
 	zio_prop_t zp;
 	int g, error;
 
-	error = metaslab_alloc(spa, spa_normal_class(spa), SPA_GANGBLOCKSIZE,
-	    bp, gbh_copies, txg, pio == gio ? NULL : gio->io_bp,
+	mc = spa_preferred_class(spa, SPA_GANGBLOCKSIZE, BP_GET_TYPE(bp), 0,
+	    gio->io_bookmark.zb_objset);
+
+	error = metaslab_alloc(spa, mc, SPA_GANGBLOCKSIZE, bp,
+	    gbh_copies, txg, pio == gio ? NULL : gio->io_bp,
 	    METASLAB_HINTBP_FAVOR | METASLAB_GANG_HEADER);
 	if (error) {
 		pio->io_error = error;
@@ -2695,7 +2700,7 @@ static int
 zio_dva_allocate(zio_t *zio)
 {
 	spa_t *spa = zio->io_spa;
-	metaslab_class_t *mc = spa_normal_class(spa);
+	metaslab_class_t *mc;
 	blkptr_t *bp = zio->io_bp;
 	int error;
 	int flags = 0;
@@ -2711,6 +2716,11 @@ zio_dva_allocate(zio_t *zio)
 	ASSERT3U(zio->io_prop.zp_copies, <=, spa_max_replication(spa));
 	ASSERT3U(zio->io_size, ==, BP_GET_PSIZE(bp));
 
+	/* locate an appropriate allocation class */
+	mc = spa_preferred_class(spa, zio->io_size, zio->io_prop.zp_type,
+	    zio->io_prop.zp_level, zio->io_prop.zp_copies == 3 ?
+	    DMU_META_OBJSET : zio->io_bookmark.zb_objset);
+
 	/*
 	 * The dump device does not support gang blocks so allocation on
 	 * behalf of the dump device (i.e. ZIO_FLAG_NODATA) must avoid
@@ -2722,6 +2732,21 @@ zio_dva_allocate(zio_t *zio)
 	flags |= (zio->io_flags & ZIO_FLAG_FASTWRITE) ? METASLAB_FASTWRITE : 0;
 	error = metaslab_alloc(spa, mc, zio->io_size, bp,
 	    zio->io_prop.zp_copies, zio->io_txg, NULL, flags);
+
+	/*
+	 * Fallback to spa_normal_class when a dedicated class is full
+	 */
+	if (error == ENOSPC && mc != spa_normal_class(spa)) {
+		mc = spa_normal_class(spa);
+		error = metaslab_alloc(spa, mc, zio->io_size, bp,
+		    zio->io_prop.zp_copies, zio->io_txg, NULL, flags);
+
+		/* DJB - TBD post an event when dedicated class is full */
+#if 0
+		zfs_ereport_post(FM_EREPORT_ZFS_CLASS_FULL, zio->io_spa,
+		    zio->io_vd, zio, 0, 0);
+#endif
+	}
 
 	if (error) {
 		spa_dbgmsg(spa, "%s: metaslab allocation failure: zio %p, "
@@ -2789,6 +2814,14 @@ zio_alloc_zil(spa_t *spa, uint64_t txg, blkptr_t *new_bp, uint64_t size,
 	int error = 1;
 
 	ASSERT(txg > spa_syncing_txg(spa));
+
+	/*
+	 * Block pointer fields are useful to metaslabs for stats and debugging.
+	 * Fill in the obvious ones before calling into metaslab_alloc().
+	 */
+	BP_SET_TYPE(new_bp, DMU_OT_INTENT_LOG);
+	BP_SET_PSIZE(new_bp, size);
+	BP_SET_LEVEL(new_bp, 0);
 
 	/*
 	 * ZIL blocks are always contiguous (i.e. not gang blocks) so we

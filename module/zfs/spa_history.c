@@ -86,6 +86,7 @@ spa_history_create_obj(spa_t *spa, dmu_tx_t *tx)
 	dmu_buf_t *dbp;
 	spa_history_phys_t *shpp;
 	objset_t *mos = spa->spa_meta_objset;
+	uint64_t space;
 
 	ASSERT(spa->spa_history == 0);
 	spa->spa_history = dmu_object_alloc(mos, DMU_OT_SPA_HISTORY,
@@ -103,11 +104,15 @@ spa_history_create_obj(spa_t *spa, dmu_tx_t *tx)
 	dmu_buf_will_dirty(dbp, tx);
 
 	/*
-	 * Figure out maximum size of history log.  We set it at
-	 * 0.1% of pool size, with a max of 1G and min of 128KB.
+	 * Figure out maximum size of history log.  We set it at 0.1% of
+	 * spa allocation class size, with a max of 1G and min of 128KB.
 	 */
-	shpp->sh_phys_max_off =
-	    metaslab_class_get_dspace(spa_normal_class(spa)) / 1000;
+	if (metaslab_class_get_space(spa_mos_class(spa)) > 0)
+		space = metaslab_class_get_dspace(spa_mos_class(spa));
+	else
+		space = metaslab_class_get_dspace(spa_normal_class(spa));
+
+	shpp->sh_phys_max_off = space / 1000;
 	shpp->sh_phys_max_off = MIN(shpp->sh_phys_max_off, 1<<30);
 	shpp->sh_phys_max_off = MAX(shpp->sh_phys_max_off, 128<<10);
 

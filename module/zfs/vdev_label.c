@@ -22,6 +22,7 @@
 /*
  * Copyright (c) 2005, 2010, Oracle and/or its affiliates. All rights reserved.
  * Copyright (c) 2013 by Delphix. All rights reserved.
+ * Copyright (c) 2016, Intel Corporation.
  */
 
 /*
@@ -423,6 +424,11 @@ vdev_config_generate(spa_t *spa, vdev_t *vd, boolean_t getstats,
 		if (vd->vdev_removing)
 			fnvlist_add_uint64(nv, ZPOOL_CONFIG_REMOVING,
 			    vd->vdev_removing);
+
+		/* zpool command expects alloc class data */
+		if (getstats && vd->vdev_classes != NULL)
+			fnvlist_add_string(nv, ZPOOL_CONFIG_ALLOC_CLASSES,
+			    vd->vdev_classes);
 	}
 
 	if (vd->vdev_dtl_sm != NULL) {

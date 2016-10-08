@@ -24,6 +24,7 @@
  * Copyright (c) 2011, 2014 by Delphix. All rights reserved.
  * Copyright 2011 Nexenta Systems, Inc.  All rights reserved.
  * Copyright (c) 2013, Joyent, Inc. All rights reserved.
+ * Copyright (c) 2016, Intel Corporation.
  */
 
 /* Portions Copyright 2010 Robert Milkowski */
@@ -604,6 +605,7 @@ typedef struct zpool_rewind_policy {
 #define	ZPOOL_CONFIG_UNSPARE		"unspare"
 #define	ZPOOL_CONFIG_PHYS_PATH		"phys_path"
 #define	ZPOOL_CONFIG_IS_LOG		"is_log"
+#define	ZPOOL_CONFIG_ALLOC_CLASSES	"classes"	/* not stored on disk */
 #define	ZPOOL_CONFIG_L2CACHE		"l2cache"
 #define	ZPOOL_CONFIG_HOLE_ARRAY		"hole_array"
 #define	ZPOOL_CONFIG_VDEV_CHILDREN	"vdev_children"
@@ -668,6 +670,12 @@ typedef struct zpool_rewind_policy {
 #define	VDEV_TYPE_SPARE			"spare"
 #define	VDEV_TYPE_LOG			"log"
 #define	VDEV_TYPE_L2CACHE		"l2cache"
+
+#define	VDEV_CLASS_ANY			"any"
+#define	VDEV_CLASS_DDT			"ddt"
+#define	VDEV_CLASS_DMU			"dmu"
+#define	VDEV_CLASS_LOG			"log"
+#define	VDEV_CLASS_MOS			"mos"
 
 /*
  * This is needed in userland to report the minimum necessary device size.

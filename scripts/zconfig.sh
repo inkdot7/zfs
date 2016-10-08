@@ -205,8 +205,8 @@ test_3() {
 	${ZFS} create -V 100M ${FULL_ZVOL_NAME} || fail 3
 	${ZFS} set snapdev=visible ${FULL_ZVOL_NAME} || fail 3
 	label /dev/zvol/${FULL_ZVOL_NAME} msdos || fail 4
-	partition /dev/zvol/${FULL_ZVOL_NAME} primary 1% 50% || fail 4
-	partition /dev/zvol/${FULL_ZVOL_NAME} primary 51% -1 || fail 4
+	partition /dev/zvol/${FULL_ZVOL_NAME} primary 1% 50% || fail 40
+	partition /dev/zvol/${FULL_ZVOL_NAME} primary 51% -1 || fail 400
 	${ZFS} snapshot ${FULL_SNAP_NAME} || fail 5
 	${ZFS} clone ${FULL_SNAP_NAME} ${FULL_CLONE_NAME} || fail 6
 

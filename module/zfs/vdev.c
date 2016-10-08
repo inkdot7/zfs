@@ -23,6 +23,7 @@
  * Copyright (c) 2005, 2010, Oracle and/or its affiliates. All rights reserved.
  * Copyright 2011 Nexenta Systems, Inc.  All rights reserved.
  * Copyright (c) 2011, 2015 by Delphix. All rights reserved.
+ * Copyright (c) 2016, Intel Corporation.
  */
 
 #include <sys/zfs_context.h>
@@ -376,9 +377,10 @@ vdev_alloc(spa_t *spa, vdev_t **vdp, nvlist_t *nv, vdev_t *parent, uint_t id,
     int alloctype)
 {
 	vdev_ops_t *ops;
-	char *type;
+	char *type, *classes = NULL;
 	uint64_t guid = 0, islog, nparity;
 	vdev_t *vd;
+	boolean_t top_level = (parent && !parent->vdev_parent);
 
 	ASSERT(spa_config_held(spa, SCL_ALL, RW_WRITER) == SCL_ALL);
 
@@ -465,10 +467,40 @@ vdev_alloc(spa_t *spa, vdev_t **vdp, nvlist_t *nv, vdev_t *parent, uint_t id,
 	}
 	ASSERT(nparity != -1ULL);
 
+	/*
+	 * If creating a top-level vdev, check for allocation classes input
+	 */
+	if (top_level && alloctype == VDEV_ALLOC_ADD) {
+		if (nvlist_lookup_string(nv, ZPOOL_CONFIG_ALLOC_CLASSES,
+		    &classes) == 0) {
+
+			if (ops != &vdev_mirror_ops && strncmp(classes,
+			    VDEV_TYPE_LOG, sizeof (VDEV_TYPE_LOG)) != 0) {
+#ifdef _KERNEL
+				printk("ZFS: Expecting mirror ops for %s class "
+				    "(was %s)\n", classes, type);
+#endif
+				return (SET_ERROR(ENOTSUP));
+			}
+			if (!spa_feature_is_enabled(spa,
+			    SPA_FEATURE_METADATA_ALLOC_CLASSES)) {
+#ifdef _KERNEL
+				printk("ZFS: spa metadata allocation class "
+				    " feature not enabled (%s)\n", classes);
+#endif
+			}
+#ifdef _KERNEL
+			printk("ZFS: vdev_alloc classes '%s'\n", classes);
+#endif
+		}
+	}
+
 	vd = vdev_alloc_common(spa, id, guid, ops);
 
 	vd->vdev_islog = islog;
 	vd->vdev_nparity = nparity;
+	if (top_level && classes != NULL)
+		vd->vdev_classes = spa_strdup(classes);
 
 	if (nvlist_lookup_string(nv, ZPOOL_CONFIG_PATH, &vd->vdev_path) == 0)
 		vd->vdev_path = spa_strdup(vd->vdev_path);
@@ -509,7 +541,7 @@ vdev_alloc(spa_t *spa, vdev_t **vdp, nvlist_t *nv, vdev_t *parent, uint_t id,
 	/*
 	 * If we're a top-level vdev, try to load the allocation parameters.
 	 */
-	if (parent && !parent->vdev_parent &&
+	if (top_level &&
 	    (alloctype == VDEV_ALLOC_LOAD || alloctype == VDEV_ALLOC_SPLIT)) {
 		(void) nvlist_lookup_uint64(nv, ZPOOL_CONFIG_METASLAB_ARRAY,
 		    &vd->vdev_ms_array);
@@ -525,13 +557,14 @@ vdev_alloc(spa_t *spa, vdev_t **vdp, nvlist_t *nv, vdev_t *parent, uint_t id,
 		ASSERT0(vd->vdev_top_zap);
 	}
 
-	if (parent && !parent->vdev_parent && alloctype != VDEV_ALLOC_ATTACH) {
+	if (top_level && alloctype != VDEV_ALLOC_ATTACH) {
 		ASSERT(alloctype == VDEV_ALLOC_LOAD ||
 		    alloctype == VDEV_ALLOC_ADD ||
 		    alloctype == VDEV_ALLOC_SPLIT ||
 		    alloctype == VDEV_ALLOC_ROOTPOOL);
-		vd->vdev_mg = metaslab_group_create(islog ?
-		    spa_log_class(spa) : spa_normal_class(spa), vd);
+		/*
+		 * Note: metaslab_group_create is now deferred
+		 */
 	}
 
 	if (vd->vdev_ops->vdev_op_leaf &&
@@ -670,6 +703,9 @@ vdev_free(vdev_t *vd)
 	if (vd->vdev_isl2cache)
 		spa_l2cache_remove(vd);
 
+	if (vd->vdev_classes)
+		spa_strfree(vd->vdev_classes);
+
 	txg_list_destroy(&vd->vdev_ms_list);
 	txg_list_destroy(&vd->vdev_dtl_list);
 
@@ -725,6 +761,9 @@ vdev_top_transfer(vdev_t *svd, vdev_t *tvd)
 
 	if (tvd->vdev_mg != NULL)
 		tvd->vdev_mg->mg_vd = tvd;
+
+	tvd->vdev_classes = svd->vdev_classes;
+	svd->vdev_classes = NULL;
 
 	tvd->vdev_stat.vs_alloc = svd->vdev_stat.vs_alloc;
 	tvd->vdev_stat.vs_space = svd->vdev_stat.vs_space;
@@ -861,6 +900,49 @@ vdev_remove_parent(vdev_t *cvd)
 	vdev_free(mvd);
 }
 
+static void
+vdev_metaslab_group_create(vdev_t *vd)
+{
+	spa_t *spa = vd->vdev_spa;
+
+	/*
+	 * metaslab_group_create was delayed until class info was available
+	 */
+	if (vd->vdev_mg == NULL) {
+		uint64_t classes = 0;
+
+		if (vd->vdev_classes != NULL) {
+			if (strstr(vd->vdev_classes, VDEV_CLASS_LOG) != NULL)
+				classes |= SPA_CLASS_MASK_LOG;
+			if (strstr(vd->vdev_classes, VDEV_CLASS_MOS) != NULL)
+				classes |= SPA_CLASS_MASK_MOS;
+			if (strstr(vd->vdev_classes, VDEV_CLASS_DDT) != NULL)
+				classes |= SPA_CLASS_MASK_DDT;
+			if (strstr(vd->vdev_classes, VDEV_CLASS_DMU) != NULL)
+				classes |= SPA_CLASS_MASK_DMU;
+		} else if (vd->vdev_islog) {
+			classes |= SPA_CLASS_MASK_LOG;
+		} else {
+			classes = SPA_CLASS_MASK_GENERAL;
+		}
+		vd->vdev_mg = metaslab_group_create(classes, vd);
+
+		/*
+		 * The spa ashift values currently only reflect the
+		 * general vdev classes. Class destination is late
+		 * binding so ashift checking had to wait until now
+		 */
+		if (vd->vdev_top == vd && vd->vdev_ashift != 0 &&
+		    vd->vdev_mg->mg_class[SPA_CLASS_GENERAL] != NULL &&
+		    vd->vdev_aux == NULL) {
+			if (vd->vdev_ashift > spa->spa_max_ashift)
+				spa->spa_max_ashift = vd->vdev_ashift;
+			if (vd->vdev_ashift < spa->spa_min_ashift)
+				spa->spa_min_ashift = vd->vdev_ashift;
+		}
+	}
+}
+
 int
 vdev_metaslab_init(vdev_t *vd, uint64_t txg)
 {
@@ -945,6 +1027,7 @@ vdev_metaslab_fini(vdev_t *vd)
 
 	if (vd->vdev_ms != NULL) {
 		metaslab_group_passivate(vd->vdev_mg);
+
 		for (m = 0; m < count; m++) {
 			metaslab_t *msp = vd->vdev_ms[m];
 
@@ -1359,9 +1442,14 @@ vdev_open(vdev_t *vd)
 
 	/*
 	 * Track the min and max ashift values for normal data devices.
+	 *
+	 * DJB - TBD these should perhaps be tracked per allocation class
+	 * (e.g. spa_min_ashift is used to round up post compression buffers)
 	 */
 	if (vd->vdev_top == vd && vd->vdev_ashift != 0 &&
-	    !vd->vdev_islog && vd->vdev_aux == NULL) {
+	    (vd->vdev_mg != NULL &&
+	    vd->vdev_mg->mg_class[SPA_CLASS_GENERAL] != NULL) &&
+	    vd->vdev_aux == NULL) {
 		if (vd->vdev_ashift > spa->spa_max_ashift)
 			spa->spa_max_ashift = vd->vdev_ashift;
 		if (vd->vdev_ashift < spa->spa_min_ashift)
@@ -1641,13 +1729,32 @@ vdev_create(vdev_t *vd, uint64_t txg, boolean_t isreplacing)
 	return (0);
 }
 
+#define	VDEV_SMALL_ASIZE	(100ULL << 30ULL)	/* 100GB */
+#define	METASLABS_MIN_GOAL	(20)
+
 void
 vdev_metaslab_set_size(vdev_t *vd)
 {
+	int metaslab_goal = metaslabs_per_vdev;
+
+	/*
+	 * Now that ZFS supports large blocks, with smaller vdevs,
+	 * we should consider going for fewer, but larger metaslabs.
+	 *
+	 * Aim for 512MB minimum size each (i.e. space for 32 16MB blocks)
+	 * but no less than a target goal of 20 metaslabs.
+	 */
+	if (vd->vdev_asize < VDEV_SMALL_ASIZE) {
+		uint64_t min_goal = MIN(metaslabs_per_vdev, METASLABS_MIN_GOAL);
+		uint64_t metaslab_size = SPA_MAXBLOCKSIZE << 5;  /* 16MB x 32 */
+
+		metaslab_goal = MAX(vd->vdev_asize / metaslab_size, min_goal);
+	}
+
 	/*
 	 * Aim for roughly metaslabs_per_vdev (default 200) metaslabs per vdev.
 	 */
-	vd->vdev_ms_shift = highbit64(vd->vdev_asize / metaslabs_per_vdev);
+	vd->vdev_ms_shift = highbit64(vd->vdev_asize / metaslab_goal);
 	vd->vdev_ms_shift = MAX(vd->vdev_ms_shift, SPA_MAXBLOCKSHIFT);
 }
 
@@ -2030,6 +2137,19 @@ vdev_construct_zaps(vdev_t *vd, dmu_tx_t *tx)
 		}
 		if (vd == vd->vdev_top && vd->vdev_top_zap == 0) {
 			vd->vdev_top_zap = vdev_create_link_zap(vd, tx);
+			if (vd->vdev_top_zap != 0 && vd->vdev_classes != NULL) {
+				VERIFY0(zap_add(vd->vdev_spa->spa_meta_objset,
+				    vd->vdev_top_zap, VDEV_METASLAB_CLASSES, 1,
+				    strlen(vd->vdev_classes) + 1,
+				    vd->vdev_classes, tx));
+#ifdef _KERNEL
+				printk("ZFS: vdev_construct_zaps assign "
+				    "classes '%s'\n", vd->vdev_classes);
+#else
+				(void) printf("ZFS: vdev_construct_zaps assign "
+				    "classes '%s'\n", vd->vdev_classes);
+#endif
+			}
 		}
 	}
 	for (i = 0; i < vd->vdev_children; i++) {
@@ -2212,12 +2332,33 @@ vdev_load(vdev_t *vd)
 	/*
 	 * If this is a top-level vdev, initialize its metaslabs.
 	 */
-	if (vd == vd->vdev_top && !vd->vdev_ishole &&
-	    (vd->vdev_ashift == 0 || vd->vdev_asize == 0 ||
-	    vdev_metaslab_init(vd, 0) != 0))
-		vdev_set_state(vd, B_FALSE, VDEV_STATE_CANT_OPEN,
-		    VDEV_AUX_CORRUPT_DATA);
+	if (vd == vd->vdev_top && !vd->vdev_ishole) {
+		char classes[64];
 
+		/*
+		 * On spa_load path, grab the class info from our zap
+		 */
+		if (vd->vdev_top_zap != 0 &&
+		    zap_lookup(vd->vdev_spa->spa_meta_objset, vd->vdev_top_zap,
+		    VDEV_METASLAB_CLASSES, 1, sizeof (classes),
+		    classes) == 0) {
+			ASSERT(vd->vdev_classes == NULL);
+			vd->vdev_classes = spa_strdup(classes);
+#ifdef _KERNEL
+			printk("ZFS: vdev_load classes '%s'\n", classes);
+#else
+			(void) printf("ZFS: vdev_load classes '%s'\n", classes);
+#endif
+		}
+
+		vdev_metaslab_group_create(vd);
+
+		if (vd->vdev_ashift == 0 || vd->vdev_asize == 0 ||
+		    vdev_metaslab_init(vd, 0) != 0) {
+			vdev_set_state(vd, B_FALSE, VDEV_STATE_CANT_OPEN,
+			    VDEV_AUX_CORRUPT_DATA);
+		}
+	}
 	/*
 	 * If this is a leaf vdev, load its DTL.
 	 */
@@ -2284,7 +2425,7 @@ vdev_remove(vdev_t *vd, uint64_t txg)
 		metaslab_group_t *mg = vd->vdev_mg;
 
 		metaslab_group_histogram_verify(mg);
-		metaslab_class_histogram_verify(mg->mg_class);
+		metaslab_group_classes_histogram_verify(mg);
 
 		for (m = 0; m < vd->vdev_ms_count; m++) {
 			metaslab_t *msp = vd->vdev_ms[m];
@@ -2310,7 +2451,7 @@ vdev_remove(vdev_t *vd, uint64_t txg)
 		}
 
 		metaslab_group_histogram_verify(mg);
-		metaslab_class_histogram_verify(mg->mg_class);
+		metaslab_group_classes_histogram_verify(mg);
 		for (i = 0; i < RANGE_TREE_HISTOGRAM_SIZE; i++)
 			ASSERT0(mg->mg_histogram[i]);
 
@@ -2885,7 +3026,8 @@ vdev_get_stats_ex(vdev_t *vd, vdev_stat_t *vs, vdev_stat_ex_t *vsx)
 		vs->vs_esize = vd->vdev_max_asize - vd->vdev_asize;
 		if (vd->vdev_aux == NULL && vd == vd->vdev_top &&
 		    !vd->vdev_ishole) {
-			vs->vs_fragmentation = vd->vdev_mg->mg_fragmentation;
+			vs->vs_fragmentation = (vd->vdev_mg != NULL) ?
+			    vd->vdev_mg->mg_fragmentation : 0;
 		}
 	}
 
@@ -3091,8 +3233,8 @@ vdev_stat_update(zio_t *zio, uint64_t psize)
 }
 
 /*
- * Update the in-core space usage stats for this vdev, its metaslab class,
- * and the root vdev.
+ * Update the in-core space usage stats for this vdev,
+ * its metaslab classes, and the root vdev.
  */
 void
 vdev_space_update(vdev_t *vd, int64_t alloc_delta, int64_t defer_delta,
@@ -3102,7 +3244,6 @@ vdev_space_update(vdev_t *vd, int64_t alloc_delta, int64_t defer_delta,
 	spa_t *spa = vd->vdev_spa;
 	vdev_t *rvd = spa->spa_root_vdev;
 	metaslab_group_t *mg = vd->vdev_mg;
-	metaslab_class_t *mc = mg ? mg->mg_class : NULL;
 
 	ASSERT(vd == vd->vdev_top);
 
@@ -3123,20 +3264,23 @@ vdev_space_update(vdev_t *vd, int64_t alloc_delta, int64_t defer_delta,
 	vd->vdev_stat.vs_dspace += dspace_delta;
 	mutex_exit(&vd->vdev_stat_lock);
 
-	if (mc == spa_normal_class(spa)) {
-		mutex_enter(&rvd->vdev_stat_lock);
-		rvd->vdev_stat.vs_alloc += alloc_delta;
-		rvd->vdev_stat.vs_space += space_delta;
-		rvd->vdev_stat.vs_dspace += dspace_delta;
-		mutex_exit(&rvd->vdev_stat_lock);
-	}
-
-	if (mc != NULL) {
+	if (mg != NULL) {
 		ASSERT(rvd == vd->vdev_parent);
 		ASSERT(vd->vdev_ms_count != 0);
 
-		metaslab_class_space_update(mc,
-		    alloc_delta, defer_delta, space_delta, dspace_delta);
+		/* all classes but LOG contribute to root vdev */
+		if (mg->mg_class[SPA_CLASS_GENERAL] != NULL ||
+		    mg->mg_class[SPA_CLASS_MOS] != NULL ||
+		    mg->mg_class[SPA_CLASS_DDT] != NULL ||
+		    mg->mg_class[SPA_CLASS_DMU] != NULL) {
+			mutex_enter(&rvd->vdev_stat_lock);
+			rvd->vdev_stat.vs_alloc += alloc_delta;
+			rvd->vdev_stat.vs_space += space_delta;
+			rvd->vdev_stat.vs_dspace += dspace_delta;
+			mutex_exit(&rvd->vdev_stat_lock);
+		}
+
+		metaslab_group_space_update(mg, space_delta, dspace_delta);
 	}
 }
 
@@ -3566,6 +3710,7 @@ vdev_expand(vdev_t *vd, uint64_t txg)
 	ASSERT(spa_config_held(vd->vdev_spa, SCL_ALL, RW_WRITER) == SCL_ALL);
 
 	if ((vd->vdev_asize >> vd->vdev_ms_shift) > vd->vdev_ms_count) {
+		vdev_metaslab_group_create(vd);
 		VERIFY(vdev_metaslab_init(vd, txg) == 0);
 		vdev_config_dirty(vd);
 	}

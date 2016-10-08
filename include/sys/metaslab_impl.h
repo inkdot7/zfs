@@ -25,6 +25,7 @@
 
 /*
  * Copyright (c) 2011, 2014 by Delphix. All rights reserved.
+ * Copyright (c) 2016, Intel Corporation.
  */
 
 #ifndef _SYS_METASLAB_IMPL_H
@@ -60,7 +61,7 @@ extern "C" {
  */
 struct metaslab_class {
 	spa_t			*mc_spa;
-	metaslab_group_t	*mc_rotor;
+	metaslab_group_t	*mc_rotor;	/* circular group list cursor */
 	metaslab_ops_t		*mc_ops;
 	uint64_t		mc_aliquot;
 	uint64_t		mc_alloc_groups; /* # of allocatable groups */
@@ -69,12 +70,15 @@ struct metaslab_class {
 	uint64_t		mc_space;	/* total space (alloc + free) */
 	uint64_t		mc_dspace;	/* total deflated space */
 	uint64_t		mc_histogram[RANGE_TREE_HISTOGRAM_SIZE];
+	uint_t			mc_type;
+
+	/* DJB - TBD track min_ashift here instead of spa ? */
 };
 
 /*
  * Metaslab groups encapsulate all the allocatable regions (i.e. metaslabs)
- * of a top-level vdev. They are linked togther to form a circular linked
- * list and can belong to only one metaslab class. Metaslab groups may become
+ * of a top-level vdev. Within each participating metaslab class they are
+ * linked togther to form a circular linked list. Metaslab groups may become
  * ineligible for allocations for a number of reasons such as limited free
  * space, fragmentation, or going offline. When this happens the allocator will
  * simply find the next metaslab group in the linked list and attempt
@@ -88,14 +92,23 @@ struct metaslab_group {
 	uint64_t		mg_free_capacity;	/* percentage free */
 	int64_t			mg_bias;
 	int64_t			mg_activation_count;
-	metaslab_class_t	*mg_class;
+	metaslab_class_t	*mg_class[SPA_CLASS_NUMTYPES];
 	vdev_t			*mg_vd;
 	taskq_t			*mg_taskq;
-	metaslab_group_t	*mg_prev;
-	metaslab_group_t	*mg_next;
+	metaslab_group_t	*mg_prev[SPA_CLASS_NUMTYPES];
+	metaslab_group_t	*mg_next[SPA_CLASS_NUMTYPES];
 	uint64_t		mg_fragmentation;
 	uint64_t		mg_histogram[RANGE_TREE_HISTOGRAM_SIZE];
+	uint64_t		mg_metaslab_cnt;	/* member metaslabs */
+	uint64_t		mg_class_cnt;	/* participating classes */
 };
+
+/*
+ * transient allocation counts for finer grain metaslab allocations
+ */
+typedef struct ms_class_acct {
+	int64_t	bin[SM_AC_NUMBINS];
+} ms_class_acct_t;
 
 /*
  * This value defines the number of elements in the ms_lbas array. The value
@@ -159,8 +172,7 @@ struct metaslab {
 	kmutex_t	ms_lock;
 	kcondvar_t	ms_load_cv;
 	space_map_t	*ms_sm;
-	metaslab_ops_t	*ms_ops;
-	uint64_t	ms_id;
+	uint64_t	ms_id;		/* index into vdev's metaslab array */
 	uint64_t	ms_start;
 	uint64_t	ms_size;
 	uint64_t	ms_fragmentation;
@@ -168,7 +180,12 @@ struct metaslab {
 	range_tree_t	*ms_alloctree[TXG_SIZE];
 	range_tree_t	*ms_freetree[TXG_SIZE];
 	range_tree_t	*ms_defertree[TXG_DEFER_SIZE];
-	range_tree_t	*ms_tree;
+	range_tree_t	*ms_tree;	/* available free space */
+
+	/* runtime space accounting by class */
+	ms_class_acct_t ms_alloc_acct[TXG_SIZE];
+	ms_class_acct_t ms_free_acct[TXG_SIZE];
+	ms_class_acct_t ms_defer_acct[TXG_DEFER_SIZE];
 
 	boolean_t	ms_condensing;	/* condensing? */
 	boolean_t	ms_condense_wanted;

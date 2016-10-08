@@ -21,6 +21,7 @@
 /*
  * Copyright (c) 2005, 2010, Oracle and/or its affiliates. All rights reserved.
  * Copyright (c) 2011, 2014 by Delphix. All rights reserved.
+ * Copyright (c) 2016, Intel Corporation.
  */
 
 #ifndef _SYS_METASLAB_H
@@ -62,6 +63,32 @@ uint64_t metaslab_block_maxsize(metaslab_t *);
 #define	METASLAB_GANG_AVOID	0x8
 #define	METASLAB_FASTWRITE	0x10
 
+/*
+ * SPA Allocation Classes
+ *
+ * A non-empty 'normal' class is required for every pool. Other classes are
+ * optional and target specific block types (overriding the normal class).
+ */
+typedef enum spa_alloc_class {
+	SPA_CLASS_GENERAL,	/* generic data (all types) */
+	SPA_CLASS_LOG,		/* intent log only */
+	SPA_CLASS_MOS,		/* MOS metadata only */
+	SPA_CLASS_DDT,		/* DDT data only */
+	SPA_CLASS_DMU,		/* DMU metadata only */
+	SPA_CLASS_NUMTYPES
+} spa_alloc_class_t;
+
+typedef enum spa_alloc_class_mask {
+	SPA_CLASS_MASK_GENERAL = 1 << SPA_CLASS_GENERAL,
+	SPA_CLASS_MASK_LOG = 1 << SPA_CLASS_LOG,
+	SPA_CLASS_MASK_MOS = 1 << SPA_CLASS_MOS,
+	SPA_CLASS_MASK_DDT = 1 << SPA_CLASS_DDT,
+	SPA_CLASS_MASK_DMU = 1 << SPA_CLASS_DMU
+} spa_alloc_class_mask_t;
+
+#define	VDEV_METASLAB_CLASSES	"com.intel:primary_classes"
+
+
 int metaslab_alloc(spa_t *, metaslab_class_t *, uint64_t,
     blkptr_t *, int, uint64_t, blkptr_t *, int);
 void metaslab_free(spa_t *, const blkptr_t *, uint64_t, boolean_t);
@@ -70,21 +97,21 @@ void metaslab_check_free(spa_t *, const blkptr_t *);
 void metaslab_fastwrite_mark(spa_t *, const blkptr_t *);
 void metaslab_fastwrite_unmark(spa_t *, const blkptr_t *);
 
-metaslab_class_t *metaslab_class_create(spa_t *, metaslab_ops_t *);
+metaslab_class_t *metaslab_class_create(spa_t *, metaslab_ops_t *,
+    spa_alloc_class_t);
 void metaslab_class_destroy(metaslab_class_t *);
 int metaslab_class_validate(metaslab_class_t *);
 void metaslab_class_histogram_verify(metaslab_class_t *);
 uint64_t metaslab_class_fragmentation(metaslab_class_t *);
 uint64_t metaslab_class_expandable_space(metaslab_class_t *);
 
-void metaslab_class_space_update(metaslab_class_t *, int64_t, int64_t,
-    int64_t, int64_t);
+void metaslab_group_space_update(metaslab_group_t *, int64_t, int64_t);
 uint64_t metaslab_class_get_alloc(metaslab_class_t *);
 uint64_t metaslab_class_get_space(metaslab_class_t *);
 uint64_t metaslab_class_get_dspace(metaslab_class_t *);
 uint64_t metaslab_class_get_deferred(metaslab_class_t *);
 
-metaslab_group_t *metaslab_group_create(metaslab_class_t *, vdev_t *);
+metaslab_group_t *metaslab_group_create(spa_alloc_class_mask_t, vdev_t *);
 void metaslab_group_destroy(metaslab_group_t *);
 void metaslab_group_activate(metaslab_group_t *);
 void metaslab_group_passivate(metaslab_group_t *);
@@ -92,6 +119,7 @@ uint64_t metaslab_group_get_space(metaslab_group_t *);
 void metaslab_group_histogram_verify(metaslab_group_t *);
 uint64_t metaslab_group_fragmentation(metaslab_group_t *);
 void metaslab_group_histogram_remove(metaslab_group_t *, metaslab_t *);
+void metaslab_group_classes_histogram_verify(metaslab_group_t *);
 
 #ifdef	__cplusplus
 }

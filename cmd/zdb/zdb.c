@@ -745,6 +745,9 @@ dump_metaslab_stats(metaslab_t *msp)
 	dump_histogram(rt->rt_histogram, RANGE_TREE_HISTOGRAM_SIZE, 0);
 }
 
+const char alloc_bin_stars[] = "*********************************";
+const char *alloc_bin_str[] = { "REG", "LOG", "MOS", "DDT", "DMU" };
+
 static void
 dump_metaslab(metaslab_t *msp)
 {
@@ -782,6 +785,37 @@ dump_metaslab(metaslab_t *msp)
 		    (u_longlong_t)msp->ms_fragmentation);
 		dump_histogram(sm->sm_phys->smp_histogram,
 		    SPACE_MAP_HISTOGRAM_SIZE, sm->sm_shift);
+
+		/*
+		 * dump allocation bins (if any)
+		 */
+		if (sm->sm_phys->smp_alloc_bin[0] ||
+		    sm->sm_phys->smp_alloc_bin[1] ||
+		    sm->sm_phys->smp_alloc_bin[2] ||
+		    sm->sm_phys->smp_alloc_bin[3] ||
+		    sm->sm_phys->smp_alloc_bin[4]) {
+			uint64_t binval, total = sm->sm_phys->smp_alloc;
+			int b, index, width = sizeof (alloc_bin_stars) - 1;
+			char allocbuf[32];
+
+			zdb_nicenum(space_map_allocated(sm), allocbuf);
+			(void) printf("\n\tAllocation Summary:\t%10s allocated "
+			    "total\n", allocbuf);
+			for (b = 0; b < 5 && total != 0; b++) {
+				binval = sm->sm_phys->smp_alloc_bin[b];
+				if (dump_opt['P']) {
+					(void) printf("\t\t\t%s: %llu\n",
+					    alloc_bin_str[b],
+					    (long long unsigned)binval);
+					continue;
+				}
+				index = width - ((width * binval) / total);
+				(void) printf("\t\t\t%s: %5.1f%%  %s\n",
+				    alloc_bin_str[b], 100.0 * binval / total,
+				    &alloc_bin_stars[index]);
+			}
+			(void) printf("\n");
+		}
 	}
 
 	if (dump_opt['d'] > 5 || dump_opt['m'] > 3) {
@@ -796,8 +830,24 @@ dump_metaslab(metaslab_t *msp)
 static void
 print_vdev_metaslab_header(vdev_t *vd)
 {
-	(void) printf("\tvdev %10llu\n\t%-10s%5llu   %-19s   %-15s   %-10s\n",
-	    (u_longlong_t)vd->vdev_id,
+	char class[32] = "(";
+
+	if (vd->vdev_islog || vd->vdev_mg->mg_class[SPA_CLASS_LOG] != NULL)
+		(void) strcat(class, VDEV_CLASS_LOG",");
+	if (vd->vdev_mg->mg_class[SPA_CLASS_MOS] != NULL)
+		(void) strcat(class, VDEV_CLASS_MOS",");
+	if (vd->vdev_mg->mg_class[SPA_CLASS_DMU] != NULL)
+		(void) strcat(class, VDEV_CLASS_DMU",");
+	if (vd->vdev_mg->mg_class[SPA_CLASS_DDT] != NULL)
+		(void) strcat(class, VDEV_CLASS_DDT",");
+
+	if (strlen(class) == 1)
+		class[0] = '\0';
+	else
+		class[strlen(class) - 1] = ')';
+
+	(void) printf("\tvdev %10llu   %s\n\t%-10s%5llu   %-19s   %-15s   "
+	    "%-10s\n", (u_longlong_t)vd->vdev_id, class,
 	    "metaslabs", (u_longlong_t)vd->vdev_ms_count,
 	    "offset", "spacemap", "free");
 	(void) printf("\t%15s   %19s   %15s   %10s\n",
@@ -805,29 +855,100 @@ print_vdev_metaslab_header(vdev_t *vd)
 	    "---------------", "-------------");
 }
 
+/*
+ * dump dedicated classes
+ */
+static void
+dump_metaslab_class(metaslab_class_t *mc, const char *name)
+{
+	uint64_t fragmentation;
+	char vdevname[16];
+
+	if (metaslab_class_get_space(mc) == 0)
+		return;
+
+	(void) snprintf(vdevname, sizeof (vdevname), "%s vdev", name);
+
+	metaslab_class_histogram_verify(mc);
+
+	(void) printf("\t%s class\tfragmentation", name);
+	fragmentation = metaslab_class_fragmentation(mc);
+	if (fragmentation == ZFS_FRAG_INVALID)
+		(void) printf("\t%3s\n", "-");
+	else
+		(void) printf("\t%3llu%%\n", (u_longlong_t)fragmentation);
+
+	dump_histogram(mc->mc_histogram, RANGE_TREE_HISTOGRAM_SIZE, 0);
+}
+
+/*
+ * build class string in alphabetical order: "ddt,dmu,log,mos"
+ */
+static int
+vdev_class_string(vdev_t *vd, char *bufptr, size_t buflen)
+{
+	if (buflen < 16)
+		return (EINVAL);
+
+	if (vd->vdev_mg == NULL)
+		return (ENODATA);
+
+	if (vd->vdev_mg->mg_class[SPA_CLASS_GENERAL] != NULL)
+		return (ENODATA);
+
+	bufptr[0] = '\0';
+
+	if (vd->vdev_mg->mg_class[SPA_CLASS_DDT] != NULL) {
+		(void) strncat(bufptr, VDEV_CLASS_DDT",", buflen);
+		buflen -= sizeof (VDEV_CLASS_DDT);
+	}
+	if (vd->vdev_mg->mg_class[SPA_CLASS_DMU] != NULL) {
+		(void) strncat(bufptr, VDEV_CLASS_DMU",", buflen);
+		buflen -= sizeof (VDEV_CLASS_DMU);
+	}
+	if (vd->vdev_mg->mg_class[SPA_CLASS_LOG] != NULL) {
+		(void) strncat(bufptr, VDEV_CLASS_LOG",", buflen);
+		buflen -= sizeof (VDEV_CLASS_LOG);
+	}
+	if (vd->vdev_mg->mg_class[SPA_CLASS_MOS] != NULL) {
+		(void) strncat(bufptr, VDEV_CLASS_MOS",", buflen);
+		buflen -= sizeof (VDEV_CLASS_MOS);
+	}
+	if (bufptr[0] != '\0') {
+		bufptr[strlen(bufptr) - 1] = '\0';
+		return (0);
+	}
+	return (ENODATA);
+}
+
 static void
 dump_metaslab_groups(spa_t *spa)
 {
 	vdev_t *rvd = spa->spa_root_vdev;
-	metaslab_class_t *mc = spa_normal_class(spa);
-	uint64_t fragmentation;
 	int c;
 
-	metaslab_class_histogram_verify(mc);
+	(void) printf("\nMetaslab Groups:\n");
 
 	for (c = 0; c < rvd->vdev_children; c++) {
 		vdev_t *tvd = rvd->vdev_child[c];
 		metaslab_group_t *mg = tvd->vdev_mg;
+		char class[32];
 
-		if (mg->mg_class != mc)
+		/* skip groups that are log-only */
+		if (mg->mg_class_cnt == 1 &&
+		    mg->mg_class[SPA_CLASS_LOG] != NULL)
 			continue;
 
 		metaslab_group_histogram_verify(mg);
 		mg->mg_fragmentation = metaslab_group_fragmentation(mg);
 
-		(void) printf("\tvdev %10llu\t\tmetaslabs%5llu\t\t"
+		class[0] = '\0';
+		(void) vdev_class_string(tvd, class, sizeof (class));
+		class[0] = '\0';
+
+		(void) printf("\tvdev %10llu\t%s\tmetaslabs%5llu\t\t"
 		    "fragmentation",
-		    (u_longlong_t)tvd->vdev_id,
+		    (u_longlong_t)tvd->vdev_id, class,
 		    (u_longlong_t)tvd->vdev_ms_count);
 		if (mg->mg_fragmentation == ZFS_FRAG_INVALID) {
 			(void) printf("%3s\n", "-");
@@ -838,13 +959,12 @@ dump_metaslab_groups(spa_t *spa)
 		dump_histogram(mg->mg_histogram, RANGE_TREE_HISTOGRAM_SIZE, 0);
 	}
 
-	(void) printf("\tpool %s\tfragmentation", spa_name(spa));
-	fragmentation = metaslab_class_fragmentation(mc);
-	if (fragmentation == ZFS_FRAG_INVALID)
-		(void) printf("\t%3s\n", "-");
-	else
-		(void) printf("\t%3llu%%\n", (u_longlong_t)fragmentation);
-	dump_histogram(mc->mc_histogram, RANGE_TREE_HISTOGRAM_SIZE, 0);
+	(void) printf("\nMetaslab Classes:\n");
+
+	dump_metaslab_class(spa_normal_class(spa), "general");
+	dump_metaslab_class(spa_mos_class(spa), "mos");
+	dump_metaslab_class(spa_dmu_class(spa), "dmu");
+	dump_metaslab_class(spa_ddt_class(spa), "ddt");
 }
 
 static void
@@ -2589,10 +2709,6 @@ zdb_leak(void *arg, uint64_t start, uint64_t size)
 	    (u_longlong_t)vd->vdev_id, (u_longlong_t)start, (u_longlong_t)size);
 }
 
-static metaslab_ops_t zdb_metaslab_ops = {
-	NULL	/* alloc */
-};
-
 static void
 zdb_ddt_leak_init(spa_t *spa, zdb_cb_t *zcb)
 {
@@ -2665,8 +2781,6 @@ zdb_leak_init(spa_t *spa, zdb_cb_t *zcb)
 					    (longlong_t)rvd->vdev_children,
 					    (longlong_t)m,
 					    (longlong_t)vd->vdev_ms_count);
-
-					msp->ms_ops = &zdb_metaslab_ops;
 
 					/*
 					 * We don't want to spend the CPU
@@ -2750,6 +2864,7 @@ dump_block_stats(spa_t *spa)
 	boolean_t leaks = B_FALSE;
 	int e, c;
 	bp_embedded_type_t i;
+	const char *ms_class_fmt;
 
 	(void) printf("\nTraversing all blocks %s%s%s%s%s...\n\n",
 	    (dump_opt['c'] || !dump_opt['L']) ? "to verify " : "",
@@ -2787,7 +2902,13 @@ dump_block_stats(spa_t *spa)
 	if (dump_opt['c'] > 1)
 		flags |= TRAVERSE_PREFETCH_DATA;
 
+	/*
+	 * zcb_totalasize is used for I/O throttling
+	 */
 	zcb.zcb_totalasize = metaslab_class_get_alloc(spa_normal_class(spa));
+	zcb.zcb_totalasize += metaslab_class_get_alloc(spa_mos_class(spa));
+	zcb.zcb_totalasize += metaslab_class_get_alloc(spa_dmu_class(spa));
+	zcb.zcb_totalasize += metaslab_class_get_alloc(spa_ddt_class(spa));
 	zcb.zcb_start = zcb.zcb_lastprint = gethrtime();
 	zcb.zcb_haderrors |= traverse_pool(spa, 0, flags, zdb_blkptr_cb, &zcb);
 
@@ -2826,7 +2947,12 @@ dump_block_stats(spa_t *spa)
 	norm_alloc = metaslab_class_get_alloc(spa_normal_class(spa));
 	norm_space = metaslab_class_get_space(spa_normal_class(spa));
 
-	total_alloc = norm_alloc + metaslab_class_get_alloc(spa_log_class(spa));
+	total_alloc = norm_alloc +
+	    metaslab_class_get_alloc(spa_log_class(spa)) +
+	    metaslab_class_get_alloc(spa_ddt_class(spa)) +
+	    metaslab_class_get_alloc(spa_dmu_class(spa)) +
+	    metaslab_class_get_alloc(spa_mos_class(spa));
+
 	total_found = tzb->zb_asize - zcb.zcb_dedup_asize;
 
 	if (total_found == total_alloc) {
@@ -2869,8 +2995,35 @@ dump_block_stats(spa_t *spa)
 	    (u_longlong_t)zcb.zcb_dedup_asize,
 	    (u_longlong_t)zcb.zcb_dedup_blocks,
 	    (double)zcb.zcb_dedup_asize / tzb->zb_asize + 1.0);
-	(void) printf("\tSPA allocated: %10llu     used: %5.2f%%\n",
+
+	ms_class_fmt = "\t%s allocated: %10llu     used: %5.2f%%\n";
+	(void) printf(ms_class_fmt, VDEV_CLASS_ANY,
 	    (u_longlong_t)norm_alloc, 100.0 * norm_alloc / norm_space);
+
+	norm_alloc = metaslab_class_get_alloc(spa_mos_class(spa));
+	norm_space = metaslab_class_get_space(spa_mos_class(spa));
+	if (norm_space) {
+		(void) printf(ms_class_fmt, VDEV_CLASS_MOS,
+		    (u_longlong_t)norm_alloc, 100.0 * norm_alloc / norm_space);
+	}
+	norm_alloc = metaslab_class_get_alloc(spa_dmu_class(spa));
+	norm_space = metaslab_class_get_space(spa_dmu_class(spa));
+	if (norm_space) {
+		(void) printf(ms_class_fmt, VDEV_CLASS_DMU,
+		    (u_longlong_t)norm_alloc, 100.0 * norm_alloc / norm_space);
+	}
+	norm_alloc = metaslab_class_get_alloc(spa_ddt_class(spa));
+	norm_space = metaslab_class_get_space(spa_ddt_class(spa));
+	if (norm_space) {
+		(void) printf(ms_class_fmt, VDEV_CLASS_DDT,
+	    (u_longlong_t)norm_alloc, 100.0 * norm_alloc / norm_space);
+	}
+	norm_alloc = metaslab_class_get_alloc(spa_log_class(spa));
+	norm_space = metaslab_class_get_space(spa_log_class(spa));
+	if (norm_space) {
+		(void) printf(ms_class_fmt, VDEV_CLASS_LOG,
+		    (u_longlong_t)norm_alloc, 100.0 * norm_alloc / norm_space);
+	}
 
 	for (i = 0; i < NUM_BP_EMBEDDED_TYPES; i++) {
 		if (zcb.zcb_embedded_blocks[i] == 0)
