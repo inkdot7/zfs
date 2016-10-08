@@ -335,7 +335,7 @@ get_usage(zpool_help_t idx) {
 	case HELP_SCRUB:
 		return (gettext("\tscrub [-s] <pool> ...\n"));
 	case HELP_STATUS:
-		return (gettext("\tstatus [-gLPvxD] [-T d|u] [pool] ... "
+		return (gettext("\tstatus [-gkLPvxD] [-T d|u] [pool] ... "
 		    "[interval [count]]\n"));
 	case HELP_UPGRADE:
 		return (gettext("\tupgrade\n"
@@ -1534,6 +1534,7 @@ typedef struct status_cbdata {
 	boolean_t	cb_explain;
 	boolean_t	cb_first;
 	boolean_t	cb_dedup_stats;
+	boolean_t	cb_kind;
 	boolean_t	cb_print_status;
 } status_cbdata_t;
 
@@ -1573,15 +1574,21 @@ print_status_config(zpool_handle_t *zhp, status_cbdata_t *cb, const char *name,
 			state = "AVAIL";
 	}
 
-	(void) printf("\t%*s%-*s  %-8s", depth, "", cb->cb_namewidth - depth,
-	    name, state);
+	(void) printf("\t%*s%-*s", depth, "", cb->cb_namewidth - depth, name);
+
+	(void) printf("  %-8s", state);
 
 	if (!isspare) {
 		zfs_nicenum(vs->vs_read_errors, rbuf, sizeof (rbuf));
 		zfs_nicenum(vs->vs_write_errors, wbuf, sizeof (wbuf));
 		zfs_nicenum(vs->vs_checksum_errors, cbuf, sizeof (cbuf));
 		(void) printf(" %5s %5s %5s", rbuf, wbuf, cbuf);
+	} else {
+		(void) printf("                  ");
 	}
+
+	if (cb->cb_kind)
+		(void) printf(" %-3s", kind_mark(nv));
 
 	if (nvlist_lookup_uint64(nv, ZPOOL_CONFIG_NOT_PRESENT,
 	    &notpresent) == 0) {
@@ -6003,9 +6010,9 @@ status_callback(zpool_handle_t *zhp, void *data)
 			cbp->cb_namewidth = 10;
 
 		(void) printf(gettext("config:\n\n"));
-		(void) printf(gettext("\t%-*s  %-8s %5s %5s %5s\n"),
+		(void) printf(gettext("\t%-*s  %-8s %5s %5s %5s%s\n"),
 		    cbp->cb_namewidth, "NAME", "STATE", "READ", "WRITE",
-		    "CKSUM");
+		    "CKSUM", cbp->cb_kind ? " KIND" : "");
 		print_status_config(zhp, cbp, zpool_get_name(zhp), nvroot, 0,
 		    B_FALSE);
 
@@ -6065,9 +6072,10 @@ status_callback(zpool_handle_t *zhp, void *data)
 }
 
 /*
- * zpool status [-gLPvx] [-T d|u] [pool] ... [interval [count]]
+ * zpool status [-gkLPvx] [-T d|u] [pool] ... [interval [count]]
  *
  *	-g	Display guid for individual vdev name.
+ *	-k      Display kind of device, e.g. solid-state or mixed.
  *	-L	Follow links when resolving vdev path name.
  *	-P	Display full path for vdev name.
  *	-v	Display complete error logs
@@ -6087,10 +6095,13 @@ zpool_do_status(int argc, char **argv)
 	status_cbdata_t cb = { 0 };
 
 	/* check options */
-	while ((c = getopt(argc, argv, "gLPvxDT:")) != -1) {
+	while ((c = getopt(argc, argv, "gkLPvxDT:")) != -1) {
 		switch (c) {
 		case 'g':
 			cb.cb_name_flags |= VDEV_NAME_GUID;
+			break;
+		case 'k':
+			cb.cb_kind = B_TRUE;
 			break;
 		case 'L':
 			cb.cb_name_flags |= VDEV_NAME_FOLLOW_LINKS;

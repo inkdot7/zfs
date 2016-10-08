@@ -159,7 +159,7 @@ zpool \- configures ZFS storage pools
 
 .LP
 .nf
-\fBzpool status\fR [\fB-gLPvxD\fR] [\fB-T\fR d | u] [\fIpool\fR] ... [\fIinterval\fR [\fIcount\fR]]
+\fBzpool status\fR [\fB-gkLPvxD\fR] [\fB-T\fR d | u] [\fIpool\fR] ... [\fIinterval\fR [\fIcount\fR]]
 .fi
 
 .LP
@@ -2091,7 +2091,7 @@ Sets the specified property for \fInewpool\fR. See the “Properties” section 
 .sp
 .ne 2
 .na
-\fBzpool status\fR [\fB-gLPvxD\fR] [\fB-T\fR d | u] [\fIpool\fR] ... [\fIinterval\fR [\fIcount\fR]]
+\fBzpool status\fR [\fB-gkLPvxD\fR] [\fB-T\fR d | u] [\fIpool\fR] ... [\fIinterval\fR [\fIcount\fR]]
 .ad
 .sp .6
 .RS 4n
@@ -2106,6 +2106,15 @@ If a scrub or resilver is in progress, this command reports the percentage done 
 .ad
 .RS 12n
 Display vdev GUIDs instead of the normal device names. These GUIDs can be used innplace of device names for the zpool detach/offline/remove/replace commands.
+.RE
+
+.sp
+.ne 2
+.na
+\fB\fB-k\fR\fR
+.ad
+.RS 12n
+Display the kind of device a pool or vdev is based on: ssd or hdd.  Mixed mirrored devices that have at least one solid-state member are marked "mix".  A pool is considered mixed if all members are at least mixed.
 .RE
 
 .sp
