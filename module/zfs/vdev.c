@@ -2958,7 +2958,6 @@ vdev_get_child_stat_ex(vdev_t *cvd, vdev_stat_ex_t *vsx, vdev_stat_ex_t *cvsx)
 		for (b = 0; b < ARRAY_SIZE(vsx->vsx_agg_histo[0]); b++)
 			vsx->vsx_agg_histo[t][b] += cvsx->vsx_agg_histo[t][b];
 	}
-
 }
 
 /*
@@ -3774,6 +3773,7 @@ vdev_deadman(vdev_t *vd)
 		mutex_exit(&vq->vq_lock);
 	}
 }
+
 
 #if defined(_KERNEL) && defined(HAVE_SPL)
 EXPORT_SYMBOL(vdev_fault);

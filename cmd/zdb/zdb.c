@@ -816,6 +816,7 @@ dump_metaslab(metaslab_t *msp)
 			}
 			(void) printf("\n");
 		}
+
 	}
 
 	if (dump_opt['d'] > 5 || dump_opt['m'] > 3) {

@@ -51,13 +51,13 @@
  * function performs several passes:
  *
  * 	1. Construct the vdev specification.  Performs syntax validation and
- *         makes sure each device is valid.
+ *	 makes sure each device is valid.
  * 	2. Check for devices in use.  Using libblkid to make sure that no
- *         devices are also in use.  Some can be overridden using the 'force'
- *         flag, others cannot.
+ *	 devices are also in use.  Some can be overridden using the 'force'
+ *	 flag, others cannot.
  * 	3. Check for replication errors if the 'force' flag is not specified.
- *         validates that the replication level is consistent across the
- *         entire pool.
+ *	 validates that the replication level is consistent across the
+ *	 entire pool.
  * 	4. Call libzfs to label any whole disks with an EFI label.
  */
 
@@ -212,9 +212,9 @@ static vdev_disk_db_entry_t vdev_disk_database[] = {
 #if 0
 	{"ATA     QEMU HARDDISK   ", 8192},
 	{"IET     VIRTUAL-DISK    ", 8192},
-	{"OI      COMSTAR         ", 8192},
-	{"SUN     COMSTAR         ", 8192},
-	{"NETAPP  LUN             ", 8192},
+	{"OI      COMSTAR	 ", 8192},
+	{"SUN     COMSTAR	 ", 8192},
+	{"NETAPP  LUN	     ", 8192},
 #endif
 };
 

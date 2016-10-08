@@ -80,8 +80,8 @@ struct metaslab_class {
  * of a top-level vdev. Within each participating metaslab class they are
  * linked togther to form a circular linked list. Metaslab groups may become
  * ineligible for allocations for a number of reasons such as limited free
- * space, fragmentation, or going offline. When this happens the allocator will
- * simply find the next metaslab group in the linked list and attempt
+ * space, fragmentation, or going offline. When this happens the allocator
+ * will simply find the next metaslab group in the linked list and attempt
  * to allocate from that group instead.
  */
 struct metaslab_group {

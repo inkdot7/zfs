@@ -3453,6 +3453,7 @@ zpool_vdev_name(libzfs_handle_t *hdl, zpool_handle_t *zhp, nvlist_t *nv,
 	char tmpbuf[PATH_BUF_LEN];	/* type id case */
 	char classbuf[PATH_BUF_LEN];	/* class case */
 
+
 	env = getenv("ZPOOL_VDEV_NAME_PATH");
 	if (env && (strtoul(env, NULL, 0) > 0 ||
 	    !strncasecmp(env, "YES", 3) || !strncasecmp(env, "ON", 2)))
@@ -3552,6 +3553,7 @@ zpool_vdev_name(libzfs_handle_t *hdl, zpool_handle_t *zhp, nvlist_t *nv,
 			strlcpy(buf, sp, sizeof (buf));
 			path = buf;
 			free(sp);
+
 		}
 	} else {
 		verify(nvlist_lookup_string(nv, ZPOOL_CONFIG_TYPE, &path) == 0);

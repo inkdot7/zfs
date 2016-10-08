@@ -1933,7 +1933,6 @@ metaslab_condense(metaslab_t *msp, uint64_t txg, dmu_tx_t *tx)
 	ASSERT3U(spa_sync_pass(spa), ==, 1);
 	ASSERT(msp->ms_loaded);
 
-
 	spa_dbgmsg(spa, "condensing: txg %llu, msp[%llu] %p, vdev id %llu, "
 	    "spa %s, smp size %llu, segments %lu, forcing condense=%s", txg,
 	    msp->ms_id, msp, msp->ms_group->mg_vd->vdev_id,

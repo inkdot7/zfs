@@ -4165,7 +4165,6 @@ zpool_do_iostat(int argc, char **argv)
 		return (1);
 	}
 
-
 	for (;;) {
 		if ((npools = pool_list_count(list)) == 0)
 			(void) fprintf(stderr, gettext("no pools available\n"));

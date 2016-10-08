@@ -63,6 +63,7 @@ uint64_t metaslab_block_maxsize(metaslab_t *);
 #define	METASLAB_GANG_AVOID	0x8
 #define	METASLAB_FASTWRITE	0x10
 
+
 /*
  * SPA Allocation Classes
  *
