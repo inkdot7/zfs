@@ -3375,12 +3375,13 @@ int ditto_same_vdev_distance_shift = 3;
  */
 static int
 metaslab_alloc_dva(spa_t *spa, metaslab_class_t *mc, uint64_t psize,
-    dva_t *dva, int d, dva_t *hintdva, uint64_t txg, int flags,
+    dva_t *dva, int d, int ndvas, dva_t *hintdva, uint64_t txg, int flags,
     zio_alloc_list_t *zal, int alloc_class)
 {
 	metaslab_group_t *mg, *fast_mg, *rotor;
 	vdev_t *vd;
 	boolean_t try_hard = B_FALSE;
+	boolean_t firstcopy = (d == 0 && ndvas > 1);
 	int nrot;
 	int i, j;
 
@@ -3405,9 +3406,20 @@ metaslab_alloc_dva(spa_t *spa, metaslab_class_t *mc, uint64_t psize,
 		nrot++;
 	}
 
+	/*
+	 * Find a rotor with some device.
+	 */
 	for (; nrot < METASLAB_CLASS_ROTORS; nrot++)
-		if (mc->mc_rotorv[nrot])
+		if ((firstcopy || !mc->mc_rotvec_onlyfirst[nrot]) &&
+		    mc->mc_rotorv[nrot])
 			break;
+	/*
+	 * In case there is no device, go backwards.
+	 */
+	if (nrot == METASLAB_CLASS_ROTORS)
+		for (--nrot; nrot >= 0; nrot--)
+			if (mc->mc_rotorv[nrot])
+				break;
 
 	/*
 	 * Start at the rotor and loop through all mgs until we find something.
@@ -3475,10 +3487,14 @@ metaslab_alloc_dva(spa_t *spa, metaslab_class_t *mc, uint64_t psize,
 	 * Also if we got a better rotor than chosen.
 	 */
 	if (mg->mg_class != mc || mg->mg_activation_count <= 0 ||
-	    mg->mg_nrot < nrot) {
-		for (i = nrot; i < METASLAB_CLASS_ROTORS; i++) {
+	    mg->mg_nrot < nrot ||
+	    !(firstcopy || !mc->mc_rotvec_onlyfirst[mg->mg_nrot])) {
+		for (i = 0; i < 2 * METASLAB_CLASS_ROTORS; i++) {
 			/* Better than failing we try the better options. */
 			j = (i + nrot) % METASLAB_CLASS_ROTORS;
+			if (i < METASLAB_CLASS_ROTORS &&
+			    !(firstcopy || !mc->mc_rotvec_onlyfirst[j]))
+				continue;
 			if (mc->mc_rotorv[j] != NULL) {
 				mg = mc->mc_rotorv[j];
 				break;
@@ -3486,8 +3502,25 @@ metaslab_alloc_dva(spa_t *spa, metaslab_class_t *mc, uint64_t psize,
 		}
 		ASSERT(mg->mg_class == mc);
 		ASSERT(mg->mg_activation_count > 0);
+		/* ASSERT(firstcopy || !mc->mc_rotvec_onlyfirst[mg->mg_nrot]); */
 		/* VERIFY3U(mg->mg_nrot, >=, nrot); */
 	}
+#ifdef _KERNEL
+	printk("d:%d nd:%d (%d%d%d%d%d) fc:%d nrot:%d (%d%d%d%d%d) %s\n",
+	       d, ndvas,
+	       mc->mc_rotvec_onlyfirst[0],
+	       mc->mc_rotvec_onlyfirst[1],
+	       mc->mc_rotvec_onlyfirst[2],
+	       mc->mc_rotvec_onlyfirst[3],
+	       mc->mc_rotvec_onlyfirst[4],
+	       firstcopy, nrot,
+	       mc->mc_rotorv[0] ? 1 : 0,
+	       mc->mc_rotorv[1] ? 1 : 0,
+	       mc->mc_rotorv[2] ? 1 : 0,
+	       mc->mc_rotorv[3] ? 1 : 0,
+	       mc->mc_rotorv[4] ? 1 : 0,
+	       firstcopy || !mc->mc_rotvec_onlyfirst[mg->mg_nrot] ? "ok" : "BAD");
+#endif
 
 top1:
 	rotor = mg;
@@ -3654,12 +3687,37 @@ next:
 	 * (Not earlier ones, to not waste expensive space for the
 	 * future for data that is not worth it.)
 	 */
-	for (i = (mg->mg_nrot - nrot + METASLAB_CLASS_ROTORS + 1) %
-	    METASLAB_CLASS_ROTORS; i && i < METASLAB_CLASS_ROTORS; i++) {
+	for (i = 0; i < 2 * METASLAB_CLASS_ROTORS; i++) {
+		if (i < (mg->mg_nrot - nrot + METASLAB_CLASS_ROTORS + 1) %
+		    METASLAB_CLASS_ROTORS)
+			continue;
 		/* Better than failing we try the better options. */
 		j = (i + nrot) % METASLAB_CLASS_ROTORS;
+		if (i < METASLAB_CLASS_ROTORS &&
+		    !(firstcopy || !mc->mc_rotvec_onlyfirst[j]))
+			continue;
 		if (mc->mc_rotorv[j] != NULL) {
 			mg = mc->mc_rotorv[j];
+			ASSERT(mg->mg_class == mc);
+			ASSERT(mg->mg_activation_count > 0);
+			/*ASSERT(firstcopy ||
+			  !mc->mc_rotvec_onlyfirst[mg->mg_nrot]);*/
+#ifdef _KERNEL
+	printk("RETRY d:%d nd:%d (%d%d%d%d%d) fc:%d nrot:%d (%d%d%d%d%d) %s\n",
+	       d, ndvas,
+	       mc->mc_rotvec_onlyfirst[0],
+	       mc->mc_rotvec_onlyfirst[1],
+	       mc->mc_rotvec_onlyfirst[2],
+	       mc->mc_rotvec_onlyfirst[3],
+	       mc->mc_rotvec_onlyfirst[4],
+	       firstcopy, nrot,
+	       mc->mc_rotorv[0] ? 1 : 0,
+	       mc->mc_rotorv[1] ? 1 : 0,
+	       mc->mc_rotorv[2] ? 1 : 0,
+	       mc->mc_rotorv[3] ? 1 : 0,
+	       mc->mc_rotorv[4] ? 1 : 0,
+	       firstcopy || !mc->mc_rotvec_onlyfirst[mg->mg_nrot] ? "ok" : "BAD");
+#endif
 			goto top1;
 		}
 	}
@@ -3873,8 +3931,8 @@ has_vdev:
 
 
 	for (d = 0; d < ndvas; d++) {
-		error = metaslab_alloc_dva(spa, mc, psize, dva, d, hintdva,
-		    txg, flags, zal, alloc_class);
+		error = metaslab_alloc_dva(spa, mc, psize, dva, d, ndvas,
+		    hintdva, txg, flags, zal, alloc_class);
 		if (error != 0) {
 			for (d--; d >= 0; d--) {
 				metaslab_free_dva(spa, &dva[d], txg, B_TRUE);
