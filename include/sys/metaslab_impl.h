@@ -217,6 +217,8 @@ struct metaslab_class {
 	/* Maximum allocation size in each rotor vector category. */
 	uint64_t		mc_rotvec_threshold[METASLAB_CLASS_ROTORS]
 	    [METASLAB_ROTOR_ALLOC_CLASSES];
+	/* Does the categorty only take first of multiple-copy blocks. */
+	int			mc_rotvec_onlyfirst[METASLAB_CLASS_ROTORS];
 	/* List of vdev guids to place in each rotor vector category. */
 	/* Should be a dynamic list. */
 	uint64_t		mc_rotvec_vdev_guids[METASLAB_CLASS_ROTORS][5];

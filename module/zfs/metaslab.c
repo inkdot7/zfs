@@ -699,6 +699,7 @@ metaslab_parse_rotor_config(metaslab_class_t *mc, char *rotorvector)
 
 	/* Clear the configuration. */
 	memset(mc->mc_rotvec_threshold, 0, sizeof (mc->mc_rotvec_threshold));
+	memset(mc->mc_rotvec_onlyfirst, 0, sizeof (mc->mc_rotvec_onlyfirst));
 	memset(mc->mc_rotvec_vdev_guids, 0, sizeof (mc->mc_rotvec_vdev_guids));
 	memset(mc->mc_rotvec_categories, 0, sizeof (mc->mc_rotvec_categories));
 
@@ -797,6 +798,7 @@ metaslab_parse_rotor_config(metaslab_class_t *mc, char *rotorvector)
 
 		if (lessthan) {
 			char *limit = lessthan+2;
+			int onlyfirst = 0;
 
 			mc->mc_rotvec_threshold[nrot][0] = 0;
 			mc->mc_rotvec_threshold[nrot][1] = 0;
@@ -818,6 +820,13 @@ metaslab_parse_rotor_config(metaslab_class_t *mc, char *rotorvector)
 					nextlimit = comma+1;
 
 				len = comma-limit;
+
+				if (len == 9 &&
+				    strncmp(limit, "onlyfirst", 9) == 0) {
+					onlyfirst = 1;
+					limit = nextlimit;
+					continue;
+				}
 
 				if (len > 5 &&
 				    strncmp(limit, "meta:", 5) == 0) {
@@ -852,6 +861,7 @@ metaslab_parse_rotor_config(metaslab_class_t *mc, char *rotorvector)
 			    mc->mc_rotvec_threshold[nrot][1])
 				mc->mc_rotvec_threshold[nrot][1] =
 				    mc->mc_rotvec_threshold[nrot][0];
+			mc->mc_rotvec_onlyfirst[nrot] = onlyfirst;
 		}
 		rotorvector = nextrotor;
 		nrot++;
