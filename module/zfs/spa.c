@@ -1118,8 +1118,13 @@ spa_activate(spa_t *spa, int mode)
 	spa->spa_mode = mode;
 
 	if (nvlist_lookup_string(spa->spa_config, ZPOOL_CONFIG_ROTORVECTOR,
-	    &rvconfig) != 0)
-		rvconfig = NULL;
+	    &rvconfig) != 0) {
+		/* This cannot be the correct way to get it during creation. */
+		if (spa->spa_rotorvector)
+			rvconfig = spa->spa_rotorvector;
+		else
+			rvconfig = NULL;
+	}
 
 	spa->spa_normal_class = metaslab_class_create(spa, zfs_metaslab_ops,
 	    rvconfig);
@@ -3797,6 +3802,7 @@ spa_create(const char *pool, nvlist_t *nvroot, nvlist_t *props,
 {
 	spa_t *spa;
 	char *altroot = NULL;
+	char *rvconfig = NULL;
 	vdev_t *rvd;
 	dsl_pool_t *dp;
 	dmu_tx_t *tx;
@@ -3830,7 +3836,9 @@ spa_create(const char *pool, nvlist_t *nvroot, nvlist_t *props,
 	fnvlist_add_string(nvl, ZPOOL_CONFIG_POOL_NAME, pool);
 	(void) nvlist_lookup_string(props,
 	    zpool_prop_to_name(ZPOOL_PROP_ALTROOT), &altroot);
-	spa = spa_add(poolname, nvl, altroot);
+	(void) nvlist_lookup_string(props,
+	    zpool_prop_to_name(ZPOOL_PROP_ROTORVECTOR), &rvconfig);
+	spa = spa_add(poolname, nvl, altroot, rvconfig);
 	fnvlist_free(nvl);
 	spa_activate(spa, spa_mode_global);
 
@@ -4064,6 +4072,7 @@ spa_import(char *pool, nvlist_t *config, nvlist_t *props, uint64_t flags)
 {
 	spa_t *spa;
 	char *altroot = NULL;
+	char *rvconfig = NULL;
 	spa_load_state_t state = SPA_LOAD_IMPORT;
 	zpool_rewind_policy_t policy;
 	uint64_t mode = spa_mode_global;
@@ -4087,11 +4096,13 @@ spa_import(char *pool, nvlist_t *config, nvlist_t *props, uint64_t flags)
 	 */
 	(void) nvlist_lookup_string(props,
 	    zpool_prop_to_name(ZPOOL_PROP_ALTROOT), &altroot);
+	(void) nvlist_lookup_string(props,
+	    zpool_prop_to_name(ZPOOL_PROP_ROTORVECTOR), &rvconfig);
 	(void) nvlist_lookup_uint64(props,
 	    zpool_prop_to_name(ZPOOL_PROP_READONLY), &readonly);
 	if (readonly)
 		mode = FREAD;
-	spa = spa_add(pool, config, altroot);
+	spa = spa_add(pool, config, altroot, rvconfig);
 	spa->spa_import_flags = flags;
 
 	/*
@@ -4264,7 +4275,7 @@ spa_tryimport(nvlist_t *tryconfig)
 	 * Create and initialize the spa structure.
 	 */
 	mutex_enter(&spa_namespace_lock);
-	spa = spa_add(TRYIMPORT_NAME, tryconfig, NULL);
+	spa = spa_add(TRYIMPORT_NAME, tryconfig, NULL, NULL);
 	spa_activate(spa, FREAD);
 
 	/*
@@ -5064,6 +5075,7 @@ spa_vdev_split_mirror(spa_t *spa, char *newname, nvlist_t *config,
 	nvlist_t **child, *nvl, *tmp;
 	dmu_tx_t *tx;
 	char *altroot = NULL;
+	char *rvconfig = NULL;
 	vdev_t *rvd, **vml = NULL;			/* vdev modify list */
 	boolean_t activate_slog;
 
@@ -5234,9 +5246,11 @@ spa_vdev_split_mirror(spa_t *spa, char *newname, nvlist_t *config,
 	VERIFY0(nvlist_add_boolean(config, ZPOOL_CONFIG_HAS_PER_VDEV_ZAPS));
 	(void) nvlist_lookup_string(props,
 	    zpool_prop_to_name(ZPOOL_PROP_ALTROOT), &altroot);
+	(void) nvlist_lookup_string(props,
+	    zpool_prop_to_name(ZPOOL_PROP_ROTORVECTOR), &rvconfig);
 
 	/* add the new pool to the namespace */
-	newspa = spa_add(newname, config, altroot);
+	newspa = spa_add(newname, config, altroot, rvconfig);
 	newspa->spa_avz_action = AVZ_ACTION_REBUILD;
 	newspa->spa_config_txg = spa->spa_config_txg;
 	spa_set_log_state(newspa, SPA_LOG_CLEAR);

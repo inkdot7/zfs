@@ -133,7 +133,7 @@ spa_config_load(void)
 
 		if (spa_lookup(nvpair_name(nvpair)) != NULL)
 			continue;
-		(void) spa_add(nvpair_name(nvpair), child, NULL);
+		(void) spa_add(nvpair_name(nvpair), child, NULL, NULL);
 	}
 	mutex_exit(&spa_namespace_lock);
 

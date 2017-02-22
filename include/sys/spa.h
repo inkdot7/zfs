@@ -677,7 +677,8 @@ extern void spa_config_update(spa_t *spa, int what);
 
 /* Namespace manipulation */
 extern spa_t *spa_lookup(const char *name);
-extern spa_t *spa_add(const char *name, nvlist_t *config, const char *altroot);
+extern spa_t *spa_add(const char *name, nvlist_t *config, const char *altroot,
+    const char *rotorvector);
 extern void spa_remove(spa_t *spa);
 extern spa_t *spa_next(spa_t *prev);
 

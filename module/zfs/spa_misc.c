@@ -551,7 +551,8 @@ spa_deadman(void *arg)
  * exist by calling spa_lookup() first.
  */
 spa_t *
-spa_add(const char *name, nvlist_t *config, const char *altroot)
+spa_add(const char *name, nvlist_t *config, const char *altroot,
+    const char *rotorvector)
 {
 	spa_t *spa;
 	spa_config_dirent_t *dp;
@@ -606,6 +607,8 @@ spa_add(const char *name, nvlist_t *config, const char *altroot)
 	 */
 	if (altroot)
 		spa->spa_root = spa_strdup(altroot);
+	if (rotorvector)
+		spa->spa_rotorvector = spa_strdup(rotorvector);
 
 	avl_create(&spa->spa_alloc_tree, zio_timestamp_compare,
 	    sizeof (zio_t), offsetof(zio_t, io_alloc_node));
