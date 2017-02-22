@@ -604,6 +604,7 @@ typedef struct zpool_rewind_policy {
 /* Type (ssd, file, mix, hdd) (part of vdev_stat_ex_t) */
 #define	ZPOOL_CONFIG_VDEV_MEDIA_TYPE	"media_type"
 #define	ZPOOL_CONFIG_VDEV_NROTOR	"nrotor"
+#define	ZPOOL_CONFIG_VDEV_ONLYFIRST	"onlyfirst"
 
 #define	ZPOOL_CONFIG_WHOLE_DISK		"whole_disk"
 #define	ZPOOL_CONFIG_ERRCOUNT		"error_count"
@@ -913,6 +914,8 @@ typedef struct vdev_stat_ex {
 	uint64_t vsx_media_type;
 	/* Allocation rotor */
 	uint64_t vsx_nrotor;
+	/* Only takes first of multiple-copy blocks.*/
+	uint64_t vsx_onlyfirst;
 } vdev_stat_ex_t;
 
 /*

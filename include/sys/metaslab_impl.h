@@ -240,6 +240,7 @@ struct metaslab_group {
 	avl_tree_t		mg_metaslab_tree;
 	uint64_t		mg_aliquot;
 	int			mg_nrot;  /* which rotor */
+	int			mg_onlyfirst; /* for zpool info purposes */
 	boolean_t		mg_allocatable;		/* can we allocate? */
 
 	/*

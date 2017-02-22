@@ -3388,6 +3388,7 @@ print_vdev_stats(zpool_handle_t *zhp, const char *name, nvlist_t *oldnv,
 	double scale;
 	nvlist_t *nvx;
 	uint64_t nrotor = (uint64_t)-1;
+	uint64_t onlyfirst = (uint64_t)-1;
 
 	calcvs = safe_malloc(sizeof (*calcvs));
 
@@ -3470,15 +3471,23 @@ print_vdev_stats(zpool_handle_t *zhp, const char *name, nvlist_t *oldnv,
 		print_iostat_histos(cb, oldnv, newnv, scale, name);
 	}
 
-	if (nvlist_lookup_nvlist(newnv, ZPOOL_CONFIG_VDEV_STATS_EX, &nvx) == 0)
+	if (nvlist_lookup_nvlist(newnv, ZPOOL_CONFIG_VDEV_STATS_EX, &nvx) ==
+	    0) {
 		nvlist_lookup_uint64(nvx, ZPOOL_CONFIG_VDEV_NROTOR,
 		    &nrotor);
+		nvlist_lookup_uint64(nvx, ZPOOL_CONFIG_VDEV_ONLYFIRST,
+		    &onlyfirst);
+	}
 
 	if (cb->cb_flags & IOS_MEDIA_TYPE_M) {
-		if (nrotor != (uint64_t)-1)
+		if (nrotor != (uint64_t)-1) {
 			(void) printf("  %d", (int)nrotor);
-		else
-			(void) printf("  -");
+			if (onlyfirst != (uint64_t)-1)
+				(void) printf("%c", (onlyfirst) ? '*' : ' ');
+			else
+				(void) printf("?");
+		} else
+			(void) printf("  - ");
 	}
 
 	if (cb->vcdl != NULL) {
