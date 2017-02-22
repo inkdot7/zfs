@@ -750,19 +750,23 @@ metaslab_parse_rotor_config(metaslab_class_t *mc, char *rotorvector)
 
 			len = comma-rotorvector;
 
-			if (strncmp(rotorvector, "ssd", len) == 0)
+			if (len == 3 && strncmp(rotorvector, "ssd", len) == 0)
 				mc->mc_rotvec_categories[nrot] |=
 				    METASLAB_ROTOR_VDEV_TYPE_SSD;
-			else if (strncmp(rotorvector, "ssd-raidz", len) == 0)
+			else if (len == 9 &&
+			    strncmp(rotorvector, "ssd-raidz", len) == 0)
 				mc->mc_rotvec_categories[nrot] |=
 				    METASLAB_ROTOR_VDEV_TYPE_SSD_RAIDZ;
-			else if (strncmp(rotorvector, "mixed", len) == 0)
+			else if (len == 5 &&
+			    strncmp(rotorvector, "mixed", len) == 0)
 				mc->mc_rotvec_categories[nrot] |=
 				    METASLAB_ROTOR_VDEV_TYPE_MIXED;
-			else if (strncmp(rotorvector, "hdd", len) == 0)
+			else if (len == 3 &&
+			    strncmp(rotorvector, "hdd", len) == 0)
 				mc->mc_rotvec_categories[nrot] |=
 				    METASLAB_ROTOR_VDEV_TYPE_HDD;
-			else if (strncmp(rotorvector, "hdd-raidz", len) == 0)
+			else if (len == 9 &&
+			    strncmp(rotorvector, "hdd-raidz", len) == 0)
 				mc->mc_rotvec_categories[nrot] |=
 				    METASLAB_ROTOR_VDEV_TYPE_HDD_RAIDZ;
 			else {
@@ -815,7 +819,7 @@ metaslab_parse_rotor_config(metaslab_class_t *mc, char *rotorvector)
 
 				len = comma-limit;
 
-				if (len > 2 &&
+				if (len > 5 &&
 				    strncmp(limit, "meta:", 5) == 0) {
 					alloc_class = 1;
 					limit += 5;
