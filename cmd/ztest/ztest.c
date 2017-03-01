@@ -6641,6 +6641,8 @@ print_time(hrtime_t t, char *timebuf)
 		(void) sprintf(timebuf, "%llus", s);
 }
 
+#define	SEGREGATE_MINDEVSIZE	(256ULL << 20)		/* 256M minimum size */
+
 static nvlist_t *
 make_random_props(void)
 {
@@ -6649,7 +6651,8 @@ make_random_props(void)
 	VERIFY(nvlist_alloc(&props, NV_UNIQUE_NAME, 0) == 0);
 
 	/* With mirror or raidz configs, use segregation 20% of the time */
-	if ((ztest_opts.zo_raidz > 1 || ztest_opts.zo_mirrors > 1) &&
+	if (ztest_opts.zo_vdev_size >= SEGREGATE_MINDEVSIZE &&
+	    (ztest_opts.zo_raidz > 1 || ztest_opts.zo_mirrors > 1) &&
 	    ztest_random(5) == 0) {
 		VERIFY(nvlist_add_uint64(props, "segregate_log", 1) == 0);
 		VERIFY(nvlist_add_uint64(props, "segregate_metadata", 1) == 0);
