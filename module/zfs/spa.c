@@ -4952,7 +4952,7 @@ spa_vdev_detach(spa_t *spa, uint64_t guid, uint64_t pguid, int replace_done)
 	if (pvd->vdev_alloc_bias == VDEV_BIAS_DEDUP ||
 	    pvd->vdev_alloc_bias == VDEV_BIAS_METADATA ||
 	    pvd->vdev_alloc_bias == VDEV_BIAS_SMALLBLKS) {
-		if (pvd->vdev_children <= 2) {
+		if (pvd->vdev_children <= 2 && 0) {
 			return (spa_vdev_exit(spa, NULL, txg, ENOTSUP));
 		}
 	}
