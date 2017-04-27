@@ -393,12 +393,14 @@ extern int zfs_vdev_cache_size;
  */
 metaslab_group_t *vdev_get_mg(vdev_t *vd, metaslab_class_t *mc);
 
+#ifdef METADATA_CLASS_ACCOUNTING
 extern void vdev_category_space_update(vdev_t *vd, int64_t metadata_alloc_delta,
     int64_t metadata_space_delta, int64_t smallblks_alloc_delta,
     int64_t smallblks_space_delta, boolean_t in_class);
 
 boolean_t vdev_category_space_full(spa_t *spa,
     metaslab_block_category_t category, uint64_t request);
+#endif
 
 #ifdef	__cplusplus
 }

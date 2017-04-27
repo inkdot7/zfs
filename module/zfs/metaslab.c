@@ -288,9 +288,11 @@ metaslab_class_space_update(metaslab_class_t *mc, int64_t alloc_delta,
 	atomic_add_64(&mc->mc_deferred, defer_delta);
 	atomic_add_64(&mc->mc_space, space_delta);
 	atomic_add_64(&mc->mc_dspace, dspace_delta);
+#ifdef METADATA_CLASS_ACCOUNTING
 	/* reset calloc for next sync window */
 	if (mc->mc_spa_sync_calloc > 0)
 		mc->mc_spa_sync_calloc = 0;
+#endif
 }
 
 uint64_t
@@ -1483,6 +1485,7 @@ metaslab_init(metaslab_group_t *mg, uint64_t id, uint64_t object, uint64_t txg,
 				mg = vdev_get_mg(vd, log_class);
 		}
 
+#ifdef METADATA_CLASS_ACCOUNTING
 		/*
 		 * TBD - this should use a space_map API
 		 */
@@ -1499,6 +1502,7 @@ metaslab_init(metaslab_group_t *mg, uint64_t id, uint64_t object, uint64_t txg,
 			    SM_ALLOC_BIAS_SMALLBLKS ||
 			    vd->vdev_alloc_bias == VDEV_BIAS_SMALLBLKS);
 		}
+#endif
 
 	} else if (vd->vdev_alloc_bias == VDEV_BIAS_SEGREGATE) {
 		metaslab_group_t *altmg;
@@ -1545,6 +1549,7 @@ metaslab_init(metaslab_group_t *mg, uint64_t id, uint64_t object, uint64_t txg,
 
 	metaslab_set_fragmentation(ms);
 
+#ifdef METADATA_CLASS_ACCOUNTING
 	if (ms->ms_category_enabled_birth == 0 &&
 	    vd->vdev_alloc_bias != VDEV_BIAS_NONE &&
 	    vd->vdev_alloc_bias != VDEV_BIAS_LOG) {
@@ -1579,6 +1584,7 @@ metaslab_init(metaslab_group_t *mg, uint64_t id, uint64_t object, uint64_t txg,
 	} else if (vd->vdev_alloc_bias == VDEV_BIAS_METADATA) {
 		vdev_category_space_update(vd, 0, ms->ms_size, 0, 0, B_FALSE);
 	}
+#endif
 
 	/*
 	 * If we're opening an existing pool (txg == 0) or creating
@@ -1620,7 +1626,9 @@ metaslab_fini(metaslab_t *msp)
 {
 	metaslab_group_t *mg = msp->ms_group;
 	vdev_t *vd = mg->mg_vd;
+#ifdef METADATA_CLASS_ACCOUNTING
 	spa_t *spa = vd->vdev_spa;
+#endif
 	int t;
 
 	metaslab_group_remove(mg, msp);
@@ -1630,6 +1638,7 @@ metaslab_fini(metaslab_t *msp)
 	metaslab_space_update(vd, mg->mg_class,
 	    -space_map_allocated(msp->ms_sm), 0, -msp->ms_size);
 
+#ifdef METADATA_CLASS_ACCOUNTING
 	if (msp->ms_sm != NULL && msp->ms_sm->sm_dbuf != NULL &&
 	    msp->ms_sm->sm_phys->smp_alloc_info.enabled_birth != 0) {
 		uint64_t md_ratio = 0, sb_ratio = 0;
@@ -1659,6 +1668,7 @@ metaslab_fini(metaslab_t *msp)
 		    SM_ALLOC_BIAS_SMALLBLKS ||
 		    vd->vdev_alloc_bias == VDEV_BIAS_SMALLBLKS);
 	}
+#endif
 	space_map_close(msp->ms_sm);
 
 	metaslab_unload(msp);
@@ -1669,9 +1679,11 @@ metaslab_fini(metaslab_t *msp)
 	for (t = 0; t < TXG_SIZE; t++) {
 		range_tree_destroy(msp->ms_alloctree[t]);
 
+#ifdef METADATA_CLASS_ACCOUNTING
 		VERIFY0(msp->ms_dedup_count[t]);
 		VERIFY0(msp->ms_metadata_count[t]);
 		VERIFY0(msp->ms_smallblks_count[t]);
+#endif
 	}
 
 	for (t = 0; t < TXG_DEFER_SIZE; t++) {
@@ -2466,6 +2478,7 @@ metaslab_sync(metaslab_t *msp, uint64_t txg)
 	metaslab_class_histogram_verify(mg->mg_class);
 	metaslab_group_histogram_remove(mg, msp);
 
+#ifdef METADATA_CLASS_ACCOUNTING
 	/*
 	 * Synchronize the allocation-by-category data into space map
 	 * header, which will be written as part of space_map_write(),
@@ -2496,6 +2509,7 @@ metaslab_sync(metaslab_t *msp, uint64_t txg)
 		msp->ms_metadata_count[txg & TXG_MASK] = 0;
 		msp->ms_smallblks_count[txg & TXG_MASK] = 0;
 	}
+#endif
 
 	if (msp->ms_loaded && spa_sync_pass(spa) == 1 &&
 	    metaslab_should_condense(msp)) {
@@ -2873,6 +2887,7 @@ metaslab_trace_fini(zio_alloc_list_t *zal)
 
 #endif /* _METASLAB_TRACING */
 
+#ifdef METADATA_CLASS_ACCOUNTING
 /*
  * Metaslab class overage stats
  */
@@ -2914,7 +2929,9 @@ metaslab_class_stat_fini(void)
 		mscs_ksp = NULL;
 	}
 }
+#endif
 
+#ifdef METADATA_CLASS_ACCOUNTING
 void
 metaslab_class_stat_update(metaslab_block_category_t blkcat, uint64_t allocated,
     uint64_t overage)
@@ -2931,6 +2948,7 @@ metaslab_class_stat_update(metaslab_block_category_t blkcat, uint64_t allocated,
 			MS_CLASS_STAT(smallblks_highest_overage) = overage;
 	}
 }
+#endif
 
 /*
  * ==========================================================================
@@ -3038,6 +3056,7 @@ metaslab_block_category(const blkptr_t *bp)
 	return (MS_CATEGORY_REGULAR);
 }
 
+#ifdef METADATA_CLASS_ACCOUNTING
 static void
 metaslab_block_track(metaslab_t *msp, int64_t size,
     metaslab_block_category_t blkcat, uint64_t birth, uint64_t txg)
@@ -3083,6 +3102,7 @@ metaslab_block_track(metaslab_t *msp, int64_t size,
 		break;
 	}
 }
+#endif
 
 static uint64_t
 metaslab_block_alloc(metaslab_t *msp, uint64_t size,
@@ -3108,7 +3128,9 @@ metaslab_block_alloc(metaslab_t *msp, uint64_t size,
 			vdev_dirty(mg->mg_vd, VDD_METASLAB, msp, txg);
 
 		range_tree_add(msp->ms_alloctree[txg & TXG_MASK], start, size);
+#ifdef METADATA_CLASS_ACCOUNTING
 		metaslab_block_track(msp, size, blkcat, txg, txg);
+#endif
 
 		/* Track the last successful allocation */
 		msp->ms_alloc_txg = txg;
@@ -3639,7 +3661,9 @@ metaslab_free_dva(spa_t *spa, const dva_t *dva,
 			vdev_dirty(vd, VDD_METASLAB, msp, txg);
 		range_tree_add(msp->ms_freeingtree, offset, size);
 	}
+#ifdef METADATA_CLASS_ACCOUNTING
 	metaslab_block_track(msp, -size, blkcat, blkbirth, txg);
+#endif
 
 	mutex_exit(&msp->ms_lock);
 }
@@ -3695,7 +3719,9 @@ metaslab_claim_dva(spa_t *spa, const dva_t *dva,
 		if (range_tree_space(msp->ms_alloctree[txg & TXG_MASK]) == 0)
 			vdev_dirty(vd, VDD_METASLAB, msp, txg);
 		range_tree_add(msp->ms_alloctree[txg & TXG_MASK], offset, size);
+#ifdef METADATA_CLASS_ACCOUNTING
 		metaslab_block_track(msp, size, blkcat, txg, txg);
+#endif
 	}
 
 	mutex_exit(&msp->ms_lock);

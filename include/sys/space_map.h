@@ -62,13 +62,19 @@ typedef struct space_map_phys {
 
 	/* More detailed allocation info */
 	struct sm_alloc_info {
+#ifdef METADATA_CLASS_ACCOUNTING
 		uint64_t	enabled_birth;	/* valid after this txg */
 		uint64_t	dedup_alloc;	/* dedup blocks allocated */
 		uint64_t	metadata_alloc;	/* metadata blocks allocated */
 		uint64_t	smallblks_alloc; /* small blocks allocated */
+#endif
 		uint64_t	alloc_bias;	/* metaslab's segregated bias */
 	} smp_alloc_info;
-
+#ifdef METADATA_CLASS_ACCOUNTING
+	uint64_t        smp_pad[4];     /* reserved */
+#else
+	uint64_t        smp_pad[5];     /* reserved */
+#endif
 	/*
 	 * The smp_histogram maintains a histogram of free regions. Each
 	 * bucket, smp_histogram[i], contains the number of free regions
@@ -176,8 +182,10 @@ void space_map_close(space_map_t *sm);
 
 int64_t space_map_alloc_delta(space_map_t *sm);
 
+#ifdef METADATA_CLASS_ACCOUNTING
 void space_map_sync_block_allocations(space_map_t *sm, int64_t dedup_delta,
     int64_t metadata_delta, int64_t smallblks_delta);
+#endif
 map_alloc_bias_t space_map_get_alloc_bias(space_map_t *sm);
 void space_map_set_alloc_bias(space_map_t *sm, map_alloc_bias_t bias);
 

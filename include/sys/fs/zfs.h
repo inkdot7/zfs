@@ -855,11 +855,14 @@ typedef struct vdev_stat {
 	uint64_t	vs_scan_removing;	/* removing?	*/
 	uint64_t	vs_scan_processed;	/* scan processed bytes	*/
 	uint64_t	vs_fragmentation;	/* device fragmentation */
+
+#ifdef METADATA_CLASS_ACCOUNTING
 	uint64_t	vs_alloc_metadata;	/* metadata allocated	*/
 	uint64_t	vs_space_metadata;	/* metadata capacity	*/
 	uint64_t	vs_alloc_smallblks;	/* small blks allocated */
 	uint64_t	vs_space_smallblks;	/* small blks capacity	*/
 	uint64_t	vs_calloc_smallblks;	/* allocated from class	*/
+#endif
 } vdev_stat_t;
 
 /*

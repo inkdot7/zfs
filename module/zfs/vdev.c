@@ -3493,6 +3493,7 @@ vdev_space_update(vdev_t *vd, int64_t alloc_delta, int64_t defer_delta,
 	/* Note: metaslab_class_space_update moved to metaslab_space_update */
 }
 
+#ifdef METADATA_CLASS_ACCOUNTING
 /*
  * propagate metaslab block category changes to vdev state
  */
@@ -3541,7 +3542,9 @@ vdev_category_space_update(vdev_t *vd, int64_t metadata_alloc_delta,
 	}
 	mutex_exit(&rvd->vdev_stat_lock);
 }
+#endif
 
+#ifdef METADATA_CLASS_ACCOUNTING
 boolean_t
 vdev_category_space_full(spa_t *spa, metaslab_block_category_t category,
     uint64_t request)
@@ -3578,6 +3581,7 @@ vdev_category_space_full(spa_t *spa, metaslab_block_category_t category,
 
 	return (B_TRUE);
 }
+#endif
 
 /*
  * Mark a top-level vdev's config as dirty, placing it on the dirty list

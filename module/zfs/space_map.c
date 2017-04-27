@@ -549,6 +549,7 @@ space_map_alloc_delta(space_map_t *sm)
 	return (sm->sm_phys->smp_alloc - space_map_allocated(sm));
 }
 
+#ifdef METADATA_CLASS_ACCOUNTING
 void
 space_map_sync_block_allocations(space_map_t *sm, int64_t dedup_delta,
     int64_t metadata_delta, int64_t smallblks_delta)
@@ -564,6 +565,7 @@ space_map_sync_block_allocations(space_map_t *sm, int64_t dedup_delta,
 	ASSERT0(sm->sm_phys->smp_alloc_info.metadata_alloc & (1ULL<<63));
 	ASSERT0(sm->sm_phys->smp_alloc_info.smallblks_alloc & (1ULL<<63));
 }
+#endif
 
 map_alloc_bias_t
 space_map_get_alloc_bias(space_map_t *sm)

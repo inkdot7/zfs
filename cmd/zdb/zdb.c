@@ -280,6 +280,7 @@ dump_space_map_header(objset_t *os, uint64_t object, void *data, size_t size)
 	    (u_longlong_t)smp->smp_objsize);
 	(void) printf("\t%14s:    %10llu\n", "smp_alloc",
 	    (u_longlong_t)smp->smp_alloc);
+#ifdef METADATA_CLASS_ACCOUNTING
 	if (smp->smp_alloc_info.enabled_birth != 0) {
 		uint64_t reg_alloc;
 
@@ -300,6 +301,7 @@ dump_space_map_header(objset_t *os, uint64_t object, void *data, size_t size)
 		(void) printf("\t%17s: %10llu (calc)\n", "generic_alloc",
 		    (u_longlong_t)reg_alloc);
 	}
+#endif
 	if (smp->smp_alloc_info.alloc_bias != 0)
 		(void) printf("\t%17s: 0x%llx\n", ".alloc_bias",
 		    (u_longlong_t)smp->smp_alloc_info.alloc_bias);
@@ -799,6 +801,7 @@ dump_metaslab_stats(metaslab_t *msp)
 	dump_histogram(rt->rt_histogram, RANGE_TREE_HISTOGRAM_SIZE, 0);
 }
 
+#ifdef METADATA_CLASS_ACCOUNTING
 const char alloc_stars[] = "*********************************";
 
 static void
@@ -843,6 +846,7 @@ dump_allocation_info(space_map_t *smp)
 	dump_allocation_line("generic", generic, total);
 	(void) printf("\n");
 }
+#endif
 
 static void
 dump_metaslab(metaslab_t *msp)
@@ -896,6 +900,7 @@ dump_metaslab(metaslab_t *msp)
 		    SPACE_MAP_HISTOGRAM_SIZE, sm->sm_shift);
 	}
 
+#ifdef METADATA_CLASS_ACCOUNTING
 	if (dump_opt['m'] > 1 && sm != NULL &&
 	    spa_feature_is_active(spa, SPA_FEATURE_ALLOCATION_CLASSES)) {
 		/*
@@ -903,6 +908,7 @@ dump_metaslab(metaslab_t *msp)
 		 */
 		dump_allocation_info(sm);
 	}
+#endif
 
 	if (dump_opt['d'] > 5 || dump_opt['m'] > 3) {
 		ASSERT(msp->ms_size == (1ULL << vd->vdev_ms_shift));
