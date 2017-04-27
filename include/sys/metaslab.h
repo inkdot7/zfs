@@ -88,9 +88,13 @@ void metaslab_alloc_trace_fini(void);
 void metaslab_trace_init(zio_alloc_list_t *);
 void metaslab_trace_fini(zio_alloc_list_t *);
 
+#ifdef METADATA_CLASS_ACCOUNTING
 void metaslab_class_stat_init(void);
 void metaslab_class_stat_fini(void);
+#endif
+#ifdef METADATA_CLASS_ACCOUNTING
 void metaslab_class_stat_update(metaslab_block_category_t, uint64_t, uint64_t);
+#endif
 
 metaslab_class_t *metaslab_class_create(spa_t *, metaslab_ops_t *);
 void metaslab_class_destroy(metaslab_class_t *);

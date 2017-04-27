@@ -4646,6 +4646,7 @@ print_list_stats(zpool_handle_t *zhp, const char *name, nvlist_t *nv,
 	}
 }
 
+#ifdef METADATA_CLASS_ACCOUNTING
 void
 print_category_stats(zpool_handle_t *zhp, const char *name, nvlist_t *nv,
     list_cbdata_t *cb, int depth)
@@ -4724,6 +4725,7 @@ print_category_stats(zpool_handle_t *zhp, const char *name, nvlist_t *nv,
 		free(vname);
 	}
 }
+#endif
 
 /*
  * Generic callback function to list a pool.
@@ -4744,11 +4746,13 @@ list_callback(zpool_handle_t *zhp, void *data)
 		    &nvroot) == 0);
 	}
 
+#ifdef METADATA_CLASS_ACCOUNTING
 	if (cbp->cb_category) {
 		print_category_stats(zhp, zpool_get_name(zhp), nvroot, cbp, 0);
 		return (0);
 
 	}
+#endif
 
 	if (cbp->cb_verbose)
 		cbp->cb_namewidth = max_width(zhp, nvroot, 0, 0,
