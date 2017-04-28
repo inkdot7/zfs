@@ -288,11 +288,6 @@ metaslab_class_space_update(metaslab_class_t *mc, int64_t alloc_delta,
 	atomic_add_64(&mc->mc_deferred, defer_delta);
 	atomic_add_64(&mc->mc_space, space_delta);
 	atomic_add_64(&mc->mc_dspace, dspace_delta);
-#ifdef METADATA_CLASS_ACCOUNTING
-	/* reset calloc for next sync window */
-	if (mc->mc_spa_sync_calloc > 0)
-		mc->mc_spa_sync_calloc = 0;
-#endif
 }
 
 uint64_t
@@ -1485,25 +1480,6 @@ metaslab_init(metaslab_group_t *mg, uint64_t id, uint64_t object, uint64_t txg,
 				mg = vdev_get_mg(vd, log_class);
 		}
 
-#ifdef METADATA_CLASS_ACCOUNTING
-		/*
-		 * TBD - this should use a space_map API
-		 */
-		if (ms->ms_sm->sm_dbuf != NULL &&
-		    ms->ms_sm->sm_phys->smp_alloc_info.enabled_birth != 0) {
-			ms->ms_category_enabled_birth =
-			    ms->ms_sm->sm_phys->smp_alloc_info.enabled_birth;
-
-			vdev_category_space_update(vd,
-			    ms->ms_sm->sm_phys->smp_alloc_info.metadata_alloc,
-			    0,
-			    ms->ms_sm->sm_phys->smp_alloc_info.smallblks_alloc,
-			    0, space_map_get_alloc_bias(ms->ms_sm) ==
-			    SM_ALLOC_BIAS_SMALLBLKS ||
-			    vd->vdev_alloc_bias == VDEV_BIAS_SMALLBLKS);
-		}
-#endif
-
 	} else if (vd->vdev_alloc_bias == VDEV_BIAS_SEGREGATE) {
 		metaslab_group_t *altmg;
 		/*
@@ -1549,43 +1525,6 @@ metaslab_init(metaslab_group_t *mg, uint64_t id, uint64_t object, uint64_t txg,
 
 	metaslab_set_fragmentation(ms);
 
-#ifdef METADATA_CLASS_ACCOUNTING
-	if (ms->ms_category_enabled_birth == 0 &&
-	    vd->vdev_alloc_bias != VDEV_BIAS_NONE &&
-	    vd->vdev_alloc_bias != VDEV_BIAS_LOG) {
-		ms->ms_category_enabled_birth =
-		    (txg != 0) ? txg : spa_first_txg(spa);
-	}
-
-	/*
-	 * if this metaslab is dedicated to serving metadata
-	 * and/or small blocks, then update the goal space
-	 * for the category
-	 */
-	if (mg == vdev_get_mg(vd, custom_class) ||
-	    vd->vdev_alloc_bias == VDEV_BIAS_SMALLBLKS) {
-		uint64_t p1 = 0, p2 = 0;
-
-		if (spa->spa_segregate_metadata ||
-		    vd->vdev_alloc_bias == VDEV_BIAS_SMALLBLKS)
-			p1 = zfs_segregated_metadata_percent;
-		if (spa->spa_segregate_smallblks ||
-		    vd->vdev_alloc_bias == VDEV_BIAS_SMALLBLKS)
-			p2 = zfs_segregated_smallblks_percent;
-
-		if (p1 || p2) {
-			uint64_t md_ratio = p1 * 100 / (p1 + p2);
-			uint64_t sb_ratio = p2 * 100 / (p1 + p2);
-
-			vdev_category_space_update(vd,
-			    0, (ms->ms_size * md_ratio) / 100,
-			    0, (ms->ms_size * sb_ratio) / 100, B_FALSE);
-		}
-	} else if (vd->vdev_alloc_bias == VDEV_BIAS_METADATA) {
-		vdev_category_space_update(vd, 0, ms->ms_size, 0, 0, B_FALSE);
-	}
-#endif
-
 	/*
 	 * If we're opening an existing pool (txg == 0) or creating
 	 * a new one (txg == TXG_INITIAL), all space is available now.
@@ -1626,9 +1565,6 @@ metaslab_fini(metaslab_t *msp)
 {
 	metaslab_group_t *mg = msp->ms_group;
 	vdev_t *vd = mg->mg_vd;
-#ifdef METADATA_CLASS_ACCOUNTING
-	spa_t *spa = vd->vdev_spa;
-#endif
 	int t;
 
 	metaslab_group_remove(mg, msp);
@@ -1638,37 +1574,6 @@ metaslab_fini(metaslab_t *msp)
 	metaslab_space_update(vd, mg->mg_class,
 	    -space_map_allocated(msp->ms_sm), 0, -msp->ms_size);
 
-#ifdef METADATA_CLASS_ACCOUNTING
-	if (msp->ms_sm != NULL && msp->ms_sm->sm_dbuf != NULL &&
-	    msp->ms_sm->sm_phys->smp_alloc_info.enabled_birth != 0) {
-		uint64_t md_ratio = 0, sb_ratio = 0;
-
-		if (mg == vdev_get_mg(vd, spa_custom_class(spa)) ||
-		    vd->vdev_alloc_bias == VDEV_BIAS_SMALLBLKS) {
-			uint64_t p1 = 0, p2 = 0;
-
-			if (spa->spa_segregate_metadata ||
-			    vd->vdev_alloc_bias == VDEV_BIAS_SMALLBLKS)
-				p1 = zfs_segregated_metadata_percent;
-			if (spa->spa_segregate_smallblks ||
-			    vd->vdev_alloc_bias == VDEV_BIAS_SMALLBLKS)
-				p2 = zfs_segregated_smallblks_percent;
-
-			if (p1 || p2) {
-				md_ratio = p1 * 100 / (p1 + p2);
-				sb_ratio = p2 * 100 / (p1 + p2);
-			}
-		}
-		vdev_category_space_update(vd,
-		    -msp->ms_sm->sm_phys->smp_alloc_info.metadata_alloc,
-		    -(msp->ms_size * md_ratio / 100),
-		    -msp->ms_sm->sm_phys->smp_alloc_info.smallblks_alloc,
-		    -(msp->ms_size * sb_ratio / 100),
-		    space_map_get_alloc_bias(msp->ms_sm) ==
-		    SM_ALLOC_BIAS_SMALLBLKS ||
-		    vd->vdev_alloc_bias == VDEV_BIAS_SMALLBLKS);
-	}
-#endif
 	space_map_close(msp->ms_sm);
 
 	metaslab_unload(msp);
@@ -1678,12 +1583,6 @@ metaslab_fini(metaslab_t *msp)
 
 	for (t = 0; t < TXG_SIZE; t++) {
 		range_tree_destroy(msp->ms_alloctree[t]);
-
-#ifdef METADATA_CLASS_ACCOUNTING
-		VERIFY0(msp->ms_dedup_count[t]);
-		VERIFY0(msp->ms_metadata_count[t]);
-		VERIFY0(msp->ms_smallblks_count[t]);
-#endif
 	}
 
 	for (t = 0; t < TXG_DEFER_SIZE; t++) {
@@ -2478,39 +2377,6 @@ metaslab_sync(metaslab_t *msp, uint64_t txg)
 	metaslab_class_histogram_verify(mg->mg_class);
 	metaslab_group_histogram_remove(mg, msp);
 
-#ifdef METADATA_CLASS_ACCOUNTING
-	/*
-	 * Synchronize the allocation-by-category data into space map
-	 * header, which will be written as part of space_map_write(),
-	 * and reset counters for the next txg sync pass.
-	 */
-	if (msp->ms_category_enabled_birth != 0) {
-		/* TBD -- need an API to activate and check birth time */
-		if (msp->ms_sm->sm_phys->smp_alloc_info.enabled_birth == 0) {
-			msp->ms_sm->sm_phys->smp_alloc_info.enabled_birth =
-			    msp->ms_category_enabled_birth;
-		}
-
-		dmu_buf_will_dirty(msp->ms_sm->sm_dbuf, tx);
-
-		space_map_sync_block_allocations(msp->ms_sm,
-		    msp->ms_dedup_count[txg & TXG_MASK],
-		    msp->ms_metadata_count[txg & TXG_MASK],
-		    msp->ms_smallblks_count[txg & TXG_MASK]);
-
-		vdev_category_space_update(vd,
-		    msp->ms_metadata_count[txg & TXG_MASK], 0,
-		    msp->ms_smallblks_count[txg & TXG_MASK], 0,
-		    space_map_get_alloc_bias(msp->ms_sm) ==
-		    SM_ALLOC_BIAS_SMALLBLKS ||
-		    vd->vdev_alloc_bias == VDEV_BIAS_SMALLBLKS);
-
-		msp->ms_dedup_count[txg & TXG_MASK] = 0;
-		msp->ms_metadata_count[txg & TXG_MASK] = 0;
-		msp->ms_smallblks_count[txg & TXG_MASK] = 0;
-	}
-#endif
-
 	if (msp->ms_loaded && spa_sync_pass(spa) == 1 &&
 	    metaslab_should_condense(msp)) {
 		metaslab_condense(msp, txg, tx);
@@ -2887,69 +2753,6 @@ metaslab_trace_fini(zio_alloc_list_t *zal)
 
 #endif /* _METASLAB_TRACING */
 
-#ifdef METADATA_CLASS_ACCOUNTING
-/*
- * Metaslab class overage stats
- */
-kstat_t *mscs_ksp = NULL;
-
-typedef struct ms_class_stats {
-	kstat_named_t	metadata_highest_allocated;
-	kstat_named_t	metadata_highest_overage;
-	kstat_named_t	smallblks_highest_allocated;
-	kstat_named_t	smallblks_highest_overage;
-} ms_class_stats_t;
-
-static ms_class_stats_t ms_class_stats = {
-	{ "metadata_highest_allocated",	KSTAT_DATA_UINT64 },
-	{ "metadata_highest_overage",	KSTAT_DATA_UINT64 },
-	{ "smallblks_highest_allocated", KSTAT_DATA_UINT64 },
-	{ "smallblks_highest_overage",	KSTAT_DATA_UINT64 }
-};
-
-#define	MS_CLASS_STAT(stat)	(ms_class_stats.stat.value.ui64)
-
-void
-metaslab_class_stat_init(void)
-{
-	mscs_ksp = kstat_create("zfs", 0, "alloc_class_stats", "misc",
-	    KSTAT_TYPE_NAMED, sizeof (ms_class_stats) / sizeof (kstat_named_t),
-	    KSTAT_FLAG_VIRTUAL);
-	if (mscs_ksp != NULL) {
-		mscs_ksp->ks_data = &ms_class_stats;
-		kstat_install(mscs_ksp);
-	}
-}
-
-void
-metaslab_class_stat_fini(void)
-{
-	if (mscs_ksp != NULL) {
-		kstat_delete(mscs_ksp);
-		mscs_ksp = NULL;
-	}
-}
-#endif
-
-#ifdef METADATA_CLASS_ACCOUNTING
-void
-metaslab_class_stat_update(metaslab_block_category_t blkcat, uint64_t allocated,
-    uint64_t overage)
-{
-	if (blkcat == MS_CATEGORY_METADATA) {
-		if (allocated > MS_CLASS_STAT(metadata_highest_allocated))
-			MS_CLASS_STAT(metadata_highest_allocated) = allocated;
-		if (overage > MS_CLASS_STAT(metadata_highest_overage))
-			MS_CLASS_STAT(metadata_highest_overage) = overage;
-	} else if (blkcat == MS_CATEGORY_SMALL) {
-		if (allocated > MS_CLASS_STAT(smallblks_highest_allocated))
-			MS_CLASS_STAT(smallblks_highest_allocated) = allocated;
-		if (overage > MS_CLASS_STAT(smallblks_highest_overage))
-			MS_CLASS_STAT(smallblks_highest_overage) = overage;
-	}
-}
-#endif
-
 /*
  * ==========================================================================
  * Metaslab block operations
@@ -3056,54 +2859,6 @@ metaslab_block_category(const blkptr_t *bp)
 	return (MS_CATEGORY_REGULAR);
 }
 
-#ifdef METADATA_CLASS_ACCOUNTING
-static void
-metaslab_block_track(metaslab_t *msp, int64_t size,
-    metaslab_block_category_t blkcat, uint64_t birth, uint64_t txg)
-{
-	uint64_t enabled_birth;
-
-	if (msp->ms_category_enabled_birth != 0)
-		enabled_birth = msp->ms_category_enabled_birth;
-	else
-		enabled_birth = UINT64_MAX;
-
-	/*
-	 * Only track if this metaslab is participating and in the case
-	 * of free if the block was allocated after we opted in.
-	 */
-	if (birth < enabled_birth)
-		return;
-
-	switch (blkcat) {
-	case MS_CATEGORY_DEDUP:
-		msp->ms_dedup_count[txg & TXG_MASK] += size;
-		break;
-	case MS_CATEGORY_METADATA:
-		msp->ms_metadata_count[txg & TXG_MASK] += size;
-		break;
-	case MS_CATEGORY_SMALL:
-		msp->ms_smallblks_count[txg & TXG_MASK] += size;
-
-		/*
-		 * vdev_category_space_update() is only updated at the end of
-		 * each txg sync. So track allocations in the txg sync window
-		 * to assist the accuracy of the vdev_category_space_full()
-		 * check (used for enforcing the small block soft limit).
-		 */
-		if (space_map_get_alloc_bias(msp->ms_sm) ==
-		    SM_ALLOC_BIAS_SMALLBLKS ||
-		    msp->ms_group->mg_vd->vdev_alloc_bias ==
-		    VDEV_BIAS_SMALLBLKS) {
-			msp->ms_group->mg_class->mc_spa_sync_calloc += size;
-		}
-		break;
-	default:
-		break;
-	}
-}
-#endif
-
 static uint64_t
 metaslab_block_alloc(metaslab_t *msp, uint64_t size,
     metaslab_block_category_t blkcat, uint64_t txg)
@@ -3128,9 +2883,6 @@ metaslab_block_alloc(metaslab_t *msp, uint64_t size,
 			vdev_dirty(mg->mg_vd, VDD_METASLAB, msp, txg);
 
 		range_tree_add(msp->ms_alloctree[txg & TXG_MASK], start, size);
-#ifdef METADATA_CLASS_ACCOUNTING
-		metaslab_block_track(msp, size, blkcat, txg, txg);
-#endif
 
 		/* Track the last successful allocation */
 		msp->ms_alloc_txg = txg;
@@ -3661,9 +3413,6 @@ metaslab_free_dva(spa_t *spa, const dva_t *dva,
 			vdev_dirty(vd, VDD_METASLAB, msp, txg);
 		range_tree_add(msp->ms_freeingtree, offset, size);
 	}
-#ifdef METADATA_CLASS_ACCOUNTING
-	metaslab_block_track(msp, -size, blkcat, blkbirth, txg);
-#endif
 
 	mutex_exit(&msp->ms_lock);
 }
@@ -3719,9 +3468,6 @@ metaslab_claim_dva(spa_t *spa, const dva_t *dva,
 		if (range_tree_space(msp->ms_alloctree[txg & TXG_MASK]) == 0)
 			vdev_dirty(vd, VDD_METASLAB, msp, txg);
 		range_tree_add(msp->ms_alloctree[txg & TXG_MASK], offset, size);
-#ifdef METADATA_CLASS_ACCOUNTING
-		metaslab_block_track(msp, size, blkcat, txg, txg);
-#endif
 	}
 
 	mutex_exit(&msp->ms_lock);

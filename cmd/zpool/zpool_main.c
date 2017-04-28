@@ -4646,87 +4646,6 @@ print_list_stats(zpool_handle_t *zhp, const char *name, nvlist_t *nv,
 	}
 }
 
-#ifdef METADATA_CLASS_ACCOUNTING
-void
-print_category_stats(zpool_handle_t *zhp, const char *name, nvlist_t *nv,
-    list_cbdata_t *cb, int depth)
-{
-	nvlist_t **child;
-	vdev_stat_t *vs;
-	uint_t c, children;
-	boolean_t scripted = cb->cb_scripted;
-
-	if (nvlist_lookup_uint64_array(nv, ZPOOL_CONFIG_VDEV_STATS,
-	    (uint64_t **)&vs, &c) != 0 ||
-	    (vs->vs_space_metadata == 0 && vs->vs_space_smallblks == 0))
-		return;
-
-	if (name != NULL && vs->vs_space != 0) {
-		uint64_t cap, gen_alloc, gen_space;
-		enum zfs_nicenum_format format;
-
-		if (cb->cb_literal)
-			format = ZFS_NICENUM_RAW;
-		else
-			format = ZFS_NICENUM_1024;
-
-		if (scripted)
-			(void) printf("\t%s", name);
-		else if (strlen(name) + depth > cb->cb_namewidth)
-			(void) printf("%*s%s", depth, "", name);
-		else
-			(void) printf("%*s%s%*s", depth, "", name,
-			    (int)(cb->cb_namewidth - strlen(name) - depth), "");
-
-		/* Print Generic Category */
-		gen_alloc = vs->vs_alloc - vs->vs_alloc_metadata -
-		    vs->vs_alloc_smallblks;
-		gen_space = vs->vs_space - vs->vs_space_metadata -
-		    vs->vs_space_smallblks;
-		print_one_column(ZPOOL_PROP_SIZE, gen_space, scripted, B_TRUE,
-		    format);
-		print_one_column(ZPOOL_PROP_ALLOCATED, gen_alloc, scripted,
-		    B_TRUE, format);
-		cap = (gen_space == 0) ? 0 : (gen_alloc * 10000 / gen_space);
-		print_one_column(ZPOOL_PROP_CAPACITY, cap, scripted, B_TRUE,
-		    format);
-
-		/* Print Small Block Category */
-		print_one_column(ZPOOL_PROP_SIZE, vs->vs_space_smallblks,
-		    scripted, B_TRUE, format);
-		print_one_column(ZPOOL_PROP_ALLOCATED, vs->vs_alloc_smallblks,
-		    scripted, B_TRUE, format);
-		cap = (vs->vs_space_smallblks == 0) ? 0 :
-		    (vs->vs_alloc_smallblks * 10000 / vs->vs_space_smallblks);
-		print_one_column(ZPOOL_PROP_CAPACITY, cap, scripted, B_TRUE,
-		    format);
-
-		/* Print Metadata Category */
-		print_one_column(ZPOOL_PROP_SIZE, vs->vs_space_metadata,
-		    scripted, B_TRUE, format);
-		print_one_column(ZPOOL_PROP_ALLOCATED, vs->vs_alloc_metadata,
-		    scripted, B_TRUE, format);
-		cap = (vs->vs_space_metadata == 0) ? 0 :
-		    (vs->vs_alloc_metadata * 10000 / vs->vs_space_metadata);
-		print_one_column(ZPOOL_PROP_CAPACITY, cap, scripted, B_TRUE,
-		    format);
-
-		(void) printf("\n");
-	}
-
-	if (nvlist_lookup_nvlist_array(nv, ZPOOL_CONFIG_CHILDREN,
-	    &child, &children) != 0)
-		return;
-
-	for (c = 0; c < children; c++) {
-		char *vname = zpool_vdev_name(g_zfs, zhp, child[c],
-		    cb->cb_name_flags);
-		print_category_stats(zhp, vname, child[c], cb, depth + 2);
-		free(vname);
-	}
-}
-#endif
-
 /*
  * Generic callback function to list a pool.
  */
@@ -4745,14 +4664,6 @@ list_callback(zpool_handle_t *zhp, void *data)
 		verify(nvlist_lookup_nvlist(config, ZPOOL_CONFIG_VDEV_TREE,
 		    &nvroot) == 0);
 	}
-
-#ifdef METADATA_CLASS_ACCOUNTING
-	if (cbp->cb_category) {
-		print_category_stats(zhp, zpool_get_name(zhp), nvroot, cbp, 0);
-		return (0);
-
-	}
-#endif
 
 	if (cbp->cb_verbose)
 		cbp->cb_namewidth = max_width(zhp, nvroot, 0, 0,

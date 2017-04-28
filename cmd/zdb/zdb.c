@@ -280,28 +280,6 @@ dump_space_map_header(objset_t *os, uint64_t object, void *data, size_t size)
 	    (u_longlong_t)smp->smp_objsize);
 	(void) printf("\t%14s:    %10llu\n", "smp_alloc",
 	    (u_longlong_t)smp->smp_alloc);
-#ifdef METADATA_CLASS_ACCOUNTING
-	if (smp->smp_alloc_info.enabled_birth != 0) {
-		uint64_t reg_alloc;
-
-		(void) printf("\t%14s:   \n", "smp_alloc_info");
-		(void) printf("\t%17s: %10llu\n", ".enabled_birth",
-		    (u_longlong_t)smp->smp_alloc_info.enabled_birth);
-		(void) printf("\t%17s: %10llu\n", ".metadata_alloc",
-		    (u_longlong_t)smp->smp_alloc_info.metadata_alloc);
-		(void) printf("\t%17s: %10llu\n", ".smallblks_alloc",
-		    (u_longlong_t)smp->smp_alloc_info.smallblks_alloc);
-		(void) printf("\t%17s: %10llu\n", ".dedup_alloc",
-		    (u_longlong_t)smp->smp_alloc_info.dedup_alloc);
-
-		reg_alloc = smp->smp_alloc;
-		reg_alloc -= smp->smp_alloc_info.metadata_alloc;
-		reg_alloc -= smp->smp_alloc_info.smallblks_alloc;
-		reg_alloc -= smp->smp_alloc_info.dedup_alloc;
-		(void) printf("\t%17s: %10llu (calc)\n", "generic_alloc",
-		    (u_longlong_t)reg_alloc);
-	}
-#endif
 	if (smp->smp_alloc_info.alloc_bias != 0)
 		(void) printf("\t%17s: 0x%llx\n", ".alloc_bias",
 		    (u_longlong_t)smp->smp_alloc_info.alloc_bias);
@@ -801,53 +779,6 @@ dump_metaslab_stats(metaslab_t *msp)
 	dump_histogram(rt->rt_histogram, RANGE_TREE_HISTOGRAM_SIZE, 0);
 }
 
-#ifdef METADATA_CLASS_ACCOUNTING
-const char alloc_stars[] = "*********************************";
-
-static void
-dump_allocation_line(const char *name, uint64_t value, uint64_t total)
-{
-	if (dump_opt['P']) {
-		(void) printf("\t\t%11s: %10llu\n", name, (u_longlong_t)value);
-	} else {
-		int index, width = sizeof (alloc_stars) - 1;
-
-		index = width - ((width * value) / total);
-		(void) printf("\t\t%11s: %5.1f%%  %s\n", name,
-		    100.0 * value / total, &alloc_stars[index]);
-	}
-}
-
-static void
-dump_allocation_info(space_map_t *smp)
-{
-	struct sm_alloc_info *info = &smp->sm_phys->smp_alloc_info;
-	uint64_t total = space_map_allocated(smp);
-	uint64_t generic = total;
-	char number[32];
-
-	if (smp->sm_phys->smp_alloc_info.enabled_birth == 0 || total == 0)
-		return;
-
-	zdb_nicenum(total, number);
-
-	(void) printf("\n\tAllocation Summary:%*s%s allocated\n",
-	    dump_opt['P'] ? 7 : 10, "", number);
-
-	generic -= info->metadata_alloc;
-	dump_allocation_line("metadata", info->metadata_alloc, total);
-
-	generic -= info->smallblks_alloc;
-	dump_allocation_line("smallblks", info->smallblks_alloc, total);
-
-	generic -= info->dedup_alloc;
-	dump_allocation_line("dedup", info->dedup_alloc, total);
-
-	dump_allocation_line("generic", generic, total);
-	(void) printf("\n");
-}
-#endif
-
 static void
 dump_metaslab(metaslab_t *msp)
 {
@@ -899,16 +830,6 @@ dump_metaslab(metaslab_t *msp)
 		dump_histogram(sm->sm_phys->smp_histogram,
 		    SPACE_MAP_HISTOGRAM_SIZE, sm->sm_shift);
 	}
-
-#ifdef METADATA_CLASS_ACCOUNTING
-	if (dump_opt['m'] > 1 && sm != NULL &&
-	    spa_feature_is_active(spa, SPA_FEATURE_ALLOCATION_CLASSES)) {
-		/*
-		 * For particiating metaslabs, there is additional alloc info
-		 */
-		dump_allocation_info(sm);
-	}
-#endif
 
 	if (dump_opt['d'] > 5 || dump_opt['m'] > 3) {
 		ASSERT(msp->ms_size == (1ULL << vd->vdev_ms_shift));
