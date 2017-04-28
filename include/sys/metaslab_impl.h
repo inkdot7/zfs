@@ -189,9 +189,6 @@ struct metaslab_class {
 	uint64_t		mc_deferred;	/* total deferred frees */
 	uint64_t		mc_space;	/* total space (alloc + free) */
 	uint64_t		mc_dspace;	/* total deflated space */
-#ifdef METADATA_CLASS_ACCOUNTING
-	uint64_t		mc_spa_sync_calloc; /* allocated during sync */
-#endif
 	uint64_t		mc_histogram[RANGE_TREE_HISTOGRAM_SIZE];
 };
 
@@ -337,14 +334,6 @@ struct metaslab {
 	range_tree_t	*ms_freeingtree; /* to free this syncing txg */
 	range_tree_t	*ms_freedtree; /* already freed this syncing txg */
 	range_tree_t	*ms_defertree[TXG_DEFER_SIZE];
-
-#ifdef METADATA_CLASS_ACCOUNTING
-	/* Track space by block categories (between syncs of SM header */
-	int64_t		ms_dedup_count[TXG_SIZE];
-	int64_t		ms_metadata_count[TXG_SIZE];
-	int64_t		ms_smallblks_count[TXG_SIZE];
-	uint64_t	ms_category_enabled_birth;
-#endif
 
 	boolean_t	ms_condensing;	/* condensing? */
 	boolean_t	ms_condense_wanted;

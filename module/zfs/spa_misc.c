@@ -1734,38 +1734,16 @@ spa_preferred_class(spa_t *spa, uint64_t size, int objtype, int level,
 		 * the nomal class is full.
 		 */
 		if (size <= zfs_class_smallblk_limit) {
-#ifdef METADATA_CLASS_ACCOUNTING
-			/*
-			 * Allow request if it will keep us under our soft limit
-			 */
-			if (!vdev_category_space_full(spa, MS_CATEGORY_SMALL,
-			    size)) {
-				return (spa_custom_class(spa));
-			}
-#else
 			/*
 			 * For small blocks: try the custom (small block) class.
 			 */
 			return (spa_custom_class(spa));
-#endif
 		} else {
-#ifdef METADATA_CLASS_ACCOUNTING
-			/*
-			 * Allow some large blocks to spill when normal is full
-			 */
-			if (vdev_category_space_full(spa, MS_CATEGORY_REGULAR,
-			    size) &&
-			    !vdev_category_space_full(spa, MS_CATEGORY_SMALL,
-			    size)) {
-				return (spa_custom_class(spa));
-			}
-#else
 			/*
 			 * For this test, we do NOT spill into the
 			 * custom (small block) class when the big
 			 * class is full.
 			 */
-#endif
 		}
 	}
 
@@ -1936,9 +1914,6 @@ spa_init(int mode)
 	unique_init();
 	range_tree_init();
 	metaslab_alloc_trace_init();
-#ifdef METADATA_CLASS_ACCOUNTING
-	metaslab_class_stat_init();
-#endif
 	ddt_init();
 	zio_init();
 	dmu_init();
@@ -1968,9 +1943,6 @@ spa_fini(void)
 	zio_fini();
 	ddt_fini();
 	metaslab_alloc_trace_fini();
-#ifdef METADATA_CLASS_ACCOUNTING
-	metaslab_class_stat_fini();
-#endif
 	range_tree_fini();
 	unique_fini();
 	refcount_fini();
