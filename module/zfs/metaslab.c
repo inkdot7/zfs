@@ -2441,6 +2441,8 @@ metaslab_sync(metaslab_t *msp, uint64_t txg)
 
 		/* segregated vdev persistent class */
 		if (vd->vdev_alloc_bias == VDEV_BIAS_SEGREGATE) {
+			dmu_buf_will_dirty(msp->ms_sm->sm_dbuf, tx);
+
 			if (mg->mg_class == spa_custom_class(spa)) {
 				space_map_set_alloc_bias(msp->ms_sm,
 				    spa->spa_segregate_smallblks ?
@@ -2475,6 +2477,9 @@ metaslab_sync(metaslab_t *msp, uint64_t txg)
 			msp->ms_sm->sm_phys->smp_alloc_info.enabled_birth =
 			    msp->ms_category_enabled_birth;
 		}
+
+		dmu_buf_will_dirty(msp->ms_sm->sm_dbuf, tx);
+
 		space_map_sync_block_allocations(msp->ms_sm,
 		    msp->ms_dedup_count[txg & TXG_MASK],
 		    msp->ms_metadata_count[txg & TXG_MASK],
